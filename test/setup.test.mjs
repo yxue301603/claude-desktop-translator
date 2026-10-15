@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { writeJson, readJson } from '../src/config.mjs';
+import { setup, activateDesktop, restoreDesktop } from '../src/setup.mjs';
+
+test('desktop activation preserves original credentials and can restore the original profile', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'cdt-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const desktopRoot = path.join(root, 'desktop');
+  const id = '00000000-0000-4000-8000-000000000001';
+  const original = { inferenceProvider: 'gateway', inferenceGatewayBaseUrl: 'https://provider.example', inferenceGatewayApiKey: 'original-secret', inferenceModels: [{ name: 'desktop-alias' }], customUnrelatedOption: 'preserved' };
+  const originalFile = path.join(desktopRoot, 'configLibrary', `${id}.json`);
+  await writeJson(originalFile, original);
+  await writeJson(path.join(desktopRoot, 'configLibrary', '_meta.json'), { appliedId: id, entries: [{ id, name: 'Original' }] });
+  await writeJson(path.join(desktopRoot, 'claude_desktop_config.json'), { locale: 'zh-CN' });
+  const configFile = path.join(root, 'translator', 'config.json');
+  const config = await setup(configFile, { desktopRoot, upstreamModel: 'real-model' });
+  assert.equal(config.credentialFile, originalFile);
+  assert.deepEqual(config.modelAliases, ['desktop-alias']);
+  assert.ok(!JSON.stringify(config).includes('original-secret'));
+  assert.ok(config.gatewayToken.length >= 24);
+  const entry = await activateDesktop(configFile);
+  assert.deepEqual(await readJson(originalFile), original);
+  const translatedProfile = await readJson(path.join(desktopRoot, 'configLibrary', `${entry.id}.json`));
+  assert.equal(translatedProfile.customUnrelatedOption, 'preserved');
+  assert.equal(translatedProfile.inferenceGatewayBaseUrl, 'http://127.0.0.1:19876');
+  assert.equal(translatedProfile.inferenceGatewayApiKey, config.gatewayToken);
+  assert.equal((await readJson(path.join(desktopRoot, 'claude_desktop_config.json'))).locale, 'zh-CN');
+  assert.equal((await activateDesktop(configFile)).id, entry.id);
+  assert.equal((await restoreDesktop(configFile)).restored, true);
+  assert.equal((await readJson(path.join(desktopRoot, 'configLibrary', '_meta.json'))).appliedId, id);
+  assert.deepEqual(await readJson(originalFile), original);
+  assert.equal((await restoreDesktop(configFile)).restored, false);
+});

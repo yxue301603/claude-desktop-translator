@@ -1,0 +1,17 @@
+{
+  "name": "claude-desktop-translator",
+  "version": "0.1.0",
+  "description": "Bidirectional Chinese/English translation gateway and launcher for Claude Desktop Code sessions",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "bin": { "claude-translator": "bin/translator.mjs" },
+  "scripts": {
+    "start": "node bin/translator.mjs serve",
+    "setup": "node bin/translator.mjs setup",
+    "test": "node --test",
+    "doctor": "node bin/translator.mjs doctor",
+    "test:live": "node scripts/live-smoke.mjs"
+  },
+  "license": "MIT"
+}

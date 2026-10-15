@@ -1,0 +1,9 @@
+node_modules/
+.local/
+*.log
+*.pid
+.env
+.env.*
+!.env.example
+coverage/
+artifacts/

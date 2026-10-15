@@ -1,0 +1,10 @@
+{
+  "port": 19876,
+  "gatewayToken": "REPLACE_WITH_A_RANDOM_LOCAL_TOKEN_AT_LEAST_24_CHARACTERS",
+  "upstreamBaseUrl": "https://api.anthropic.com",
+  "upstreamModel": "claude-sonnet-4-6",
+  "translationModel": "claude-sonnet-4-6",
+  "modelAliases": ["claude-sonnet-4-6"],
+  "translationTimeoutMs": 60000,
+  "requestTimeoutMs": 180000
+}
