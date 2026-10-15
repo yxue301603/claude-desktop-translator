@@ -1,114 +1,99 @@
-# Claude Desktop Translator
+# Claude Desktop Translator · 离线版
 
-在 **Claude 桌面应用的 Code 标签页**中输入中文，实际发给模型的用户文字自动翻译为英文；模型回答中的英文自动翻译为简体中文并显示在原会话里。
+在 Windows 上为 **整个 Claude 桌面应用**提供中英翻译，支持普通 Chat；使用 Claude 中已经登录的官方账号，不需要 Claude API Key、Gateway 或第三方翻译 API。
 
-实现由一个零依赖 Node.js 本地翻译网关、启动器，以及可选的 Claude Code 原生辅助插件组成。**需要桌面版支持的第三方推理 / Gateway 配置和 API 凭据**，不能直接挂到 Claude Pro/Max 订阅会话。原生插件负责启动网关，单独安装插件不会改变输入框或回答。
+这是一个**伴随窗口形式的桌面增强工具**，不是 Code 标签页的原生插件，也不是 MCP / DXT 扩展。中文写在伴随窗口中，点击发送或按 Enter 后，本地模型翻译成英文，再填入 Claude 官方输入框并发送。Claude 回答保持在原窗口，中文译文自动显示在伴随窗口。
 
 ```text
-Code 标签页输入中文
-  → 127.0.0.1 本地网关
-  → 中译英 → 现有模型 API
-  → 英译中 → 原 Code 会话显示中文
+伴随窗口输入中文 → 本机离线模型 → 英文填入 Claude 官方输入框
+                                         ↓
+                                已登录的 Claude 官方账号
+                                         ↓
+中文译文显示在伴随窗口 ← 本机离线模型 ← 只读辅助功能读取回答
 ```
 
-## 已验证的行为
+## 安装
 
-- 中文用户文字在主模型请求发送前译为英文，翻译失败时返回错误。
-- 普通 JSON 响应和 SSE 流式响应中的回答文字译为中文。
-- 行内代码、围栏代码块、URL 和常见路径用占位符保护后逐字还原。
-- 工具调用参数、工具结果、图片、文档附件、思考块与签名直接透传。
-- JSON 对象/数组和显式请求的结构化回答直接透传，避免破坏机器协议。
-- 创建单独的桌面翻译配置，保留原配置及原 API 密钥，可切换恢复。
-- 仅监听 IPv4 回环地址，要求本地随机密钥，拒绝网页 Origin；日志仅记录事件与计数。
-
-2026-10-15 已在 Windows、Claude Desktop 2.37337.1 / 内置 Claude Code 2.1.275 上用现有 DeepSeek `deepseek-flash` 接口实测：中文输入、中文回答、读取 `package.json` 工具、多轮会话、代码块及行内命令均正常。普通 / 流式 API 的真实验收脚本会断言上游收到的提示为英文。其他系统有网关单元测试；macOS / Linux 桌面操作尚未实机验证。
-
-## 安装与启动
-
-安装 Node.js 22 或更新版本，以及已配置 Gateway 的 Claude 桌面版。无需 `npm install`。
+需要 Windows、Node.js 22+、Windows PowerShell 5.1 和已安装的 Claude 桌面版。普通 Chat 可以使用当前账号可用的权限；本工具不改变账号套餐或额度。
 
 ```powershell
 git clone https://github.com/yxue301603/claude-desktop-translator.git
 cd claude-desktop-translator
-node bin/translator.mjs setup
-node bin/translator.mjs doctor
-node bin/translator.mjs start
+npm ci
+npm run setup
+npm run models
 ```
 
-通过 **File → Exit** 完全退出 Claude 桌面应用，然后执行 `node bin/translator.mjs activate-desktop` 并双击 **`启动翻译.cmd`**。后续每次使用此启动器，网关会先启动，再打开 Claude。进入 **Code → Local**，选择项目并正常输入中文即可，不需要斜杠命令。
+`models` 首次下载两个中英翻译模型，合计数百 MB。后续翻译在本地 CPU 上进行，运行时禁止加载远端模型。模型缓存位于 `~/.claude-desktop-translator/offline-models/`。
 
-`setup` 优先读取当前桌面 Gateway 配置，API 密钥按原文件路径引用；找不到桌面配置时，尝试读取 `~/.claude/settings.json` 的 API 配置。默认把本地配置与日志存到 `~/.claude-desktop-translator/`。不会把 API 密钥写入源码仓库。
-
-桌面模型路由名称沿用原配置，网关展示的模型名称标明实际 `upstreamModel`，不会把模型别名当作实际模型身份。可用性仍由上游服务和桌面版的模型支持规则决定。
-
-若桌面原先使用网关模型别名，可指定实际模型：
+如果下载需要本机现有代理，在 Node.js 24 中可先设置以下环境变量，再运行 `npm run models`。地址请填写自己正在使用的代理：
 
 ```powershell
-node bin/translator.mjs setup --upstream-model deepseek-flash
+$env:HTTPS_PROXY = 'http://127.0.0.1:YOUR_PROXY_PORT'
+$env:HTTP_PROXY = $env:HTTPS_PROXY
+$env:NODE_USE_ENV_PROXY = '1'
+npm run models
 ```
 
-如果没有现有 Gateway，请先在 Claude 的 **Help → Troubleshooting → Enable Developer Mode → Developer → Configure Third-Party Inference** 配置自己的 API 网关，再执行上述步骤。托管设备上的组织策略优先于本地设置。
+如果之前启用了第三方推理，`setup` 会备份桌面配置并切回官方账号模式。请通过 Claude 的 **File → Exit** 完全退出，然后双击 **`启动翻译.cmd`**。
 
-## 可选：安装原生辅助插件
+## 使用
 
-在 Claude Code 中运行：
+1. 在 Claude 桌面版打开普通 Chat，登录自己的账号。
+2. 在“Claude 中英翻译 · 离线”窗口输入中文。Enter 发送，Shift+Enter 换行。
+3. 插件会显示实际提交的英文，并填入 Claude 输入框、校验内容后发送。
+4. 回答结束后，中文译文自动显示在插件窗口。关闭“自动读取”可暂停读取回答。
 
-```text
-/plugin marketplace add yxue301603/claude-desktop-translator
-/plugin install claude-desktop-translator@claude-desktop-translator
-```
+也可以在 Claude 输入框先写中文，再点击伴随窗口的“翻译并发送给 Claude”；这种情况下请保持伴随窗口自己的输入区为空。在伴随窗口写了文字时，如果 Claude 输入框还有其他草稿，插件会停止发送，避免覆盖草稿。
 
-或使用命令行：
+请保持 Windows 解锁且 Claude 窗口可交互。焦点校验失败时不会提交，中文输入会保留。
+
+## 翻译与代码
+
+- 采用 `Xenova/opus-mt-zh-en` 与 `Xenova/opus-mt-en-zh` 的量化 ONNX 模型，使用 Transformers.js 和本地 CPU 推理。
+- 输入中的行内代码、围栏代码、URL、常见路径被分开保护，不交给翻译模型。
+- 回答通过辅助功能的文本与等宽字体识别代码，给代码内容加保护后再翻译。辅助功能不提供完整 Markdown，复杂表格、代码缩进或其他格式可能与原界面不同；完整原文始终保留在 Claude。
+- 译文在回答结束后显示。它不改写 Claude 的历史记录，也不改变后续对话上下文。
+- 小型离线翻译模型可能误译复杂指令或技术术语，发送前后的英文预览和 Claude 原文可用于核对。
+
+## 数据与权限
+
+主对话完全由 Claude 官方桌面客户端使用当前账号发送。本工具不读取 Claude 登录凭据，不转发主模型请求，不使用第三方翻译服务。
+
+运行时只有一个绑定 `127.0.0.1:19877` 的本地翻译进程。伴随窗口通过随机本地令牌与它通信；该进程只提供翻译操作，没有模型 API 代理接口，并拒绝网页 Origin。正常日志不保存输入、回答或译文。
+
+桌面集成只通过 Windows 辅助功能读取 Claude 窗口，在用户点击发送或在工具自己的输入区按 Enter 后填入英文。没有全局键鼠监听，也不使用剪贴板。中文输出在伴随窗口中显示，Claude 原界面保留原文。
+
+## 状态与停止
 
 ```powershell
-claude plugin marketplace add yxue301603/claude-desktop-translator
-claude plugin install claude-desktop-translator@claude-desktop-translator
+npm run status
+npm run stop
 ```
 
-新会话的 `SessionStart` 会检查并启动已配置的网关；`/claude-desktop-translator:translator-status` 可查看状态。桌面启动时就需要网关，所以仍建议使用启动器。
+关闭伴随窗口后可用 `stop` 释放模型内存；存在活动翻译时服务会拒绝停止。配置位于 `~/.claude-desktop-translator/offline.json`，它只保存本地端口和本地随机令牌。
 
-## 状态、停止与恢复
+从旧版 0.1.0 升级时，先停用并卸载旧的 Code 辅助插件：
 
 ```powershell
-node bin/translator.mjs status
-node bin/translator.mjs stop
-node bin/translator.mjs restore-desktop
+claude plugin disable claude-desktop-translator@claude-desktop-translator
+claude plugin uninstall claude-desktop-translator@claude-desktop-translator
 ```
 
-`stop` 在有活动请求时拒绝停止。`restore-desktop` 重新选择原来的推理配置，不删除任何原配置；完全退出并重开 Claude 后生效。恢复原配置后再停止网关。
+旧版 Gateway 实现仅留在 Git 历史中；当前代码不包含它的运行逻辑。
 
-若只是关闭窗口，Claude 可能还在托盘运行；使用应用菜单 **File → Exit** 完全退出。遇到端口占用时先检查 `status`，不要终止其他不相关程序。
-
-## 手动配置
-
-把 `config.example.json` 复制到仓库外的私有目录，生成随机 `gatewayToken`，配置自己的上游和翻译模型，然后通过环境变量 `CDT_UPSTREAM_API_KEY` 提供 API 密钥。可用 `CDT_TRANSLATION_API_KEY` 和配置项 `translationBaseUrl` 单独指定翻译服务。
-
-```powershell
-node bin/translator.mjs serve --config C:\private\translator-config.json
-```
-
-在桌面版第三方推理界面选择 Gateway，地址为 `http://127.0.0.1:19876`，凭据为本地 `gatewayToken`，模型选择上游支持的名称。所有命令支持 `--config PATH`；如果原生插件需要使用自定义路径，请为运行 Claude 的用户设置 `CDT_CONFIG` 环境变量。
-
-## 设计限制
-
-- 网关按完整文本块翻译 SSE 回答，避免把代码围栏和句子切坏。因此中文按文本块出现，而非逐 token 出现；等待时仍转发工具和思考事件。
-- 翻译会产生额外的 API 调用和费用，默认使用同一个已配置服务。中文输入、英文输出会交给该服务翻译。
-- 系统提示、项目文件内容、工具结果和代码中的中文保持原样。翻译范围是用户正文与回答正文；这不是对所有上下文逐字转换。
-- 显示后的中文回答会保存在桌面会话记录中。后续轮次的历史回答沿用这份中文记录。
-- 模型可能误译自然语言。保护后的代码必须原样返回，否则请求报错；普通文字仍应人工核对。
-- 自动配置以已有的 **Gateway + 静态 API 密钥**配置为基础；Bedrock、Vertex 等原生签名认证配置不在自动导入范围内。
-
-## 验证与开发
+## 验证
 
 ```powershell
 node --test
-node scripts/live-smoke.mjs
-claude plugin validate .
-claude plugin validate .claude-plugin/plugin.json
+npm run doctor
+powershell -NoProfile -STA -ExecutionPolicy Bypass -File windows/start-bridge.ps1 -Config unused -CompileOnly
 ```
 
-`node --test` 不使用真实 API 密钥，覆盖真实 HTTP 网关、SSE 任意分块、工具参数和思考签名保留、代码字面量、失败处理、结构化输出和桌面配置恢复。`live-smoke.mjs` 使用本地凭据调用真实 API，结果写到被 Git 忽略的 `.local/`。
+`doctor` 在禁止所有 `fetch` 网络调用的条件下运行真实本地模型，检查中英翻译与代码保护。普通测试使用模拟模型，覆盖代码分段、长度限制、串行推理、失败恢复、本地请求鉴权及账号模式配置备份。
 
-官方接口参考：[桌面 Gateway 配置](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app)、[桌面插件](https://code.claude.com/docs/en/desktop#install-plugins)、[Hooks](https://code.claude.com/docs/en/hooks)。
+界面集成针对 Windows Claude Desktop 2.37337.1 的普通 Chat 开发。macOS / Linux 尚不支持伴随窗口；Claude 界面结构变化时可能需要更新辅助功能定位。
+
+模型来源：[中译英模型](https://huggingface.co/Xenova/opus-mt-zh-en)、[英译中模型](https://huggingface.co/Xenova/opus-mt-en-zh)、[Transformers.js](https://huggingface.co/docs/transformers.js/)。模型权重由各自作者按其许可证发布，不随源码分发。
 
 MIT License。本项目与 Anthropic 无隶属关系。

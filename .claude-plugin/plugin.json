@@ -1,8 +1,0 @@
-{
-  "name": "claude-desktop-translator",
-  "version": "0.1.0",
-  "description": "Start the configured Chinese/English translation gateway for local Claude Desktop Code sessions.",
-  "author": { "name": "yxue301603" },
-  "license": "MIT",
-  "homepage": "https://github.com/yxue301603/claude-desktop-translator"
-}

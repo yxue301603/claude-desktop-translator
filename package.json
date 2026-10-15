@@ -1,17 +1,26 @@
 {
   "name": "claude-desktop-translator",
-  "version": "0.1.0",
-  "description": "Bidirectional Chinese/English translation gateway and launcher for Claude Desktop Code sessions",
+  "version": "0.2.0",
+  "description": "Offline Chinese/English companion for the signed-in Claude Desktop app on Windows",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=22" },
-  "bin": { "claude-translator": "bin/translator.mjs" },
-  "scripts": {
-    "start": "node bin/translator.mjs serve",
-    "setup": "node bin/translator.mjs setup",
-    "test": "node --test",
-    "doctor": "node bin/translator.mjs doctor",
-    "test:live": "node scripts/live-smoke.mjs"
+  "engines": {
+    "node": ">=22"
   },
-  "license": "MIT"
+  "bin": {
+    "claude-translator": "bin/translator.mjs"
+  },
+  "scripts": {
+    "start": "node bin/offline.mjs launch",
+    "setup": "node bin/offline.mjs setup",
+    "models": "node scripts/download-models.mjs",
+    "test": "node --test",
+    "doctor": "node scripts/offline-smoke.mjs",
+    "status": "node bin/offline.mjs status",
+    "stop": "node bin/offline.mjs stop"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1"
+  }
 }

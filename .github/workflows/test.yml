@@ -17,3 +17,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node --test
+      - name: Compile Windows companion
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\windows\start-bridge.ps1 -Config unused -CompileOnly
