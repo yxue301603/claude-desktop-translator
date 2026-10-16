@@ -31,6 +31,7 @@ namespace ClaudeOfflineTranslator
         private int polling;
         private int sending;
         private int translatingAnswer;
+        private Action restoreClipboard;
         private string lastAnswerKey = "";
         private void DebugStage(string stage)
         {
@@ -132,6 +133,7 @@ namespace ClaudeOfflineTranslator
             {
                 enabled = false;
                 poll.Stop();
+                RestoreClipboard();
             };
         }
 
@@ -209,6 +211,39 @@ namespace ClaudeOfflineTranslator
             return string.Join("|", window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document)).Cast<AutomationElement>().Select(e => e.Current.Name));
         }
 
+        private static bool InputMatches(AutomationElement input, string expected)
+        {
+            if (NormalizeLines(ReadInput(input)) == NormalizeLines(expected)) return true;
+            // Claude turns typed backticks into a code span and adds a zero-width
+            // caret marker. Reconstruct only code spans identified by their font;
+            // code characters must still match exactly before sending.
+            var result = new StringBuilder();
+            var code = new StringBuilder();
+            Action flushCode = delegate
+            {
+                if (code.Length == 0) return;
+                result.Append('`').Append(code).Append('`');
+                code.Clear();
+            };
+            foreach (AutomationElement node in input.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)))
+            {
+                object pattern;
+                if (!node.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) return false;
+                var range = ((TextPattern)pattern).DocumentRange;
+                var text = range.GetText(-1);
+                var font = Convert.ToString(range.GetAttributeValue(TextPattern.FontNameAttribute));
+                if (Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase)) code.Append(text);
+                else { flushCode(); result.Append(text.Replace("\u200b", "")); }
+            }
+            flushCode();
+            return NormalizeLines(result.ToString()) == NormalizeLines(expected);
+        }
+
+        private static string NormalizeLines(string text)
+        {
+            return text.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
+        }
+
         private string Translate(string text, string target)
         {
             var request = (HttpWebRequest)WebRequest.Create(endpoint + "/translate");
@@ -251,33 +286,44 @@ namespace ClaudeOfflineTranslator
                             if (ReadInput(current.Input) != desktopDraft) throw new InvalidOperationException("Claude 草稿已改动，请重新发送。");
                             if (ownInput && source.Text != original) throw new InvalidOperationException("中文输入已改动，请重新发送。");
                             if (ReadContext(current.Window) != current.Context) throw new InvalidOperationException("Claude 会话已切换，请重新发送。");
-                            english.Text = translated;
+                            english.Text = translated.Replace("\r\n", "\n").Replace("\n", "\r\n");
                             SetForegroundWindow(current.Handle);
                             current.Input.SetFocus();
                             if (!Automation.Compare(AutomationElement.FocusedElement, current.Input)) throw new InvalidOperationException("Claude 输入框未获得焦点，未提交。请解锁屏幕并打开聊天窗口。");
                             DebugStage("input_focus_ready");
-                            SelectAll();
-                            TypeUnicode(translated);
+                            restoreClipboard = PasteText(translated);
                             DebugStage("english_typed");
-                            var timer = new System.Windows.Forms.Timer { Interval = 180 };
+                            var timer = new System.Windows.Forms.Timer { Interval = 100 };
+                            int verificationAttempts = 0;
                             timer.Tick += delegate
                             {
-                                timer.Stop(); timer.Dispose();
                                 try
                                 {
-                                    if (ReadInput(current.Input).TrimEnd('\r', '\n') != translated.TrimEnd('\r', '\n')) throw new InvalidOperationException("输入框内容校验失败，未提交。");
+                                    verificationAttempts++;
+                                    if (ReadContext(current.Window) != current.Context) throw new InvalidOperationException("Claude 会话已切换，未提交。");
+                                    if (!InputMatches(current.Input, translated))
+                                    {
+                                        if (verificationAttempts < 100) return;
+                                        throw new InvalidOperationException("输入框内容校验失败，未提交。");
+                                    }
                                     var send = FindSend(current.Window);
-                                    if (send == null) throw new InvalidOperationException("Claude 当前不可发送；英文已填入输入框。");
+                                    if (send == null)
+                                    {
+                                        if (verificationAttempts < 100) return;
+                                        throw new InvalidOperationException("Claude 当前不可发送；英文已填入输入框。");
+                                    }
+                                    timer.Stop(); timer.Dispose();
+                                    RestoreClipboard();
                                     ((InvokePattern)send.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
                                     source.Clear();
                                     status.Text = "英文已由 Claude 官方客户端提交。";
+                                    Interlocked.Exchange(ref sending, 0);
                                 }
-                                catch (Exception error) { status.Text = error.Message; }
-                                finally { Interlocked.Exchange(ref sending, 0); }
+                                catch (Exception error) { timer.Stop(); timer.Dispose(); status.Text = error.Message; Interlocked.Exchange(ref sending, 0); RestoreClipboard(); }
                             };
                             timer.Start();
                         }
-                        catch (Exception error) { status.Text = error.Message; sending = 0; }
+                        catch (Exception error) { status.Text = error.Message; sending = 0; RestoreClipboard(); }
                     });
                 }
                 catch { Ui(delegate { status.Text = "离线翻译失败，原文未提交。请检查本地模型。"; sending = 0; }); }
@@ -309,6 +355,20 @@ namespace ClaudeOfflineTranslator
 
         private static string ReadResponse(AutomationElement body, string fallback)
         {
+            AutomationElement responseBody = null;
+            foreach (AutomationElement text in body.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)))
+            {
+                var ancestor = TreeWalker.RawViewWalker.GetParent(text);
+                for (int depth = 0; depth < 12 && ancestor != null && !Automation.Compare(ancestor, body); depth++)
+                {
+                    if ((ancestor.Current.ClassName ?? "").Split(' ').Contains("font-claude-response")) { responseBody = ancestor; break; }
+                    ancestor = TreeWalker.RawViewWalker.GetParent(ancestor);
+                }
+                if (responseBody != null) break;
+            }
+            // Promotion cards and action controls are siblings of the response.
+            if (responseBody == null) return fallback;
+            body = responseBody;
             var result = new StringBuilder();
             var code = new StringBuilder();
             Action flushCode = delegate
@@ -324,9 +384,11 @@ namespace ClaudeOfflineTranslator
                 if ((node.Current.ClassName ?? "").Contains("sr-only")) continue;
                 var ancestor = TreeWalker.RawViewWalker.GetParent(node);
                 bool auxiliary = false;
+                bool codeBlock = false;
                 for (int depth = 0; depth < 12 && ancestor != null && !Automation.Compare(ancestor, body); depth++)
                 {
                     if (ancestor.Current.ControlType == ControlType.ToolBar || ancestor.Current.ControlType == ControlType.Button) { auxiliary = true; break; }
+                    if ((ancestor.Current.Name ?? "").EndsWith(" code", StringComparison.Ordinal) && (ancestor.Current.ClassName ?? "").Contains("group/copy")) codeBlock = true;
                     ancestor = TreeWalker.RawViewWalker.GetParent(ancestor);
                 }
                 if (auxiliary) continue;
@@ -336,24 +398,58 @@ namespace ClaudeOfflineTranslator
                 var text = range.GetText(-1);
                 if (string.IsNullOrEmpty(text)) continue;
                 var font = Convert.ToString(range.GetAttributeValue(TextPattern.FontNameAttribute));
-                if (Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase)) code.Append(text);
+                bool monospace = Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase);
+                if (codeBlock && !monospace) continue;
+                if (monospace) code.Append(text);
                 else { flushCode(); result.Append(text); }
             }
             flushCode();
             return result.Length == 0 ? fallback : result.ToString();
         }
 
-        private static void TypeUnicode(string text)
+        private static Action PasteText(string text)
         {
-            var inputs = new NativeInput[text.Length * 2];
-            for (int i = 0; i < text.Length; i++)
+            var original = Clipboard.GetDataObject();
+            // Materialize every available format before replacing the clipboard.
+            var saved = new DataObject();
+            if (original != null)
+                foreach (var format in original.GetFormats(false))
+                {
+                    var value = original.GetData(format, false);
+                    if (value != null) saved.SetData(format, false, value);
+                }
+            Clipboard.SetText(text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n"), TextDataFormat.UnicodeText);
+            var sequence = GetClipboardSequenceNumber();
+            Action restore = delegate
             {
-                inputs[2 * i] = new NativeInput { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { Scan = text[i], Flags = 4 } } };
-                inputs[2 * i + 1] = new NativeInput { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { Scan = text[i], Flags = 6 } } };
+                // A later user copy takes precedence over our saved contents.
+                if (GetClipboardSequenceNumber() != sequence) return;
+                if (saved.GetFormats(false).Length == 0) Clipboard.Clear();
+                else Clipboard.SetDataObject(saved, true, 5, 100);
+            };
+            try
+            {
+                SelectAll();
+                var inputs = new[] {
+                    new NativeInput { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { VirtualKey = 0x11 } } },
+                    new NativeInput { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { VirtualKey = 0x56 } } },
+                    new NativeInput { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { VirtualKey = 0x56, Flags = 2 } } },
+                    new NativeInput { Type = 1, Union = new InputUnion { Keyboard = new KeyboardInput { VirtualKey = 0x11, Flags = 2 } } }
+                };
+                if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeInput))) != inputs.Length) throw new InvalidOperationException("无法粘贴英文；请检查 Claude 窗口权限。");
+                return restore;
             }
-            if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeInput))) != inputs.Length) throw new InvalidOperationException("无法输入英文；请检查 Claude 窗口权限。");
+            catch { restore(); throw; }
         }
 
+        private void RestoreClipboard()
+        {
+            var restore = restoreClipboard;
+            restoreClipboard = null;
+            if (restore == null) return;
+            try { restore(); }
+            catch { status.Text += " 剪贴板恢复失败。"; }
+        }
         private static void SelectAll()
         {
             var inputs = new[] {
@@ -372,6 +468,7 @@ namespace ClaudeOfflineTranslator
         }
 
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
         [StructLayout(LayoutKind.Sequential)] private struct NativeInput { public uint Type; public InputUnion Union; }
         [StructLayout(LayoutKind.Explicit)] private struct InputUnion { [FieldOffset(0)] public MouseInput Mouse; [FieldOffset(0)] public KeyboardInput Keyboard; }
         [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }

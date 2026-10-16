@@ -62,7 +62,7 @@ npm run models
 
 运行时只有一个绑定 `127.0.0.1:19877` 的本地翻译进程。伴随窗口通过随机本地令牌与它通信；该进程只提供翻译操作，没有模型 API 代理接口，并拒绝网页 Origin。正常日志不保存输入、回答或译文。
 
-桌面集成只通过 Windows 辅助功能读取 Claude 窗口，在用户点击发送或在工具自己的输入区按 Enter 后填入英文。没有全局键鼠监听，也不使用剪贴板。中文输出在伴随窗口中显示，Claude 原界面保留原文。
+桌面集成只通过 Windows 辅助功能读取 Claude 窗口，在用户点击发送或在工具自己的输入区按 Enter 后填入英文。没有全局键鼠监听。为保留多行与 Markdown，发送时会临时把英文放入系统剪贴板并粘贴；校验草稿后恢复先前的剪贴板内容。如果期间用户进行了新的复制操作，则保留用户新复制的内容。系统若启用了剪贴板历史或同步，会按其设置处理这次临时复制。中文输出在伴随窗口中显示，Claude 原界面保留原文。
 
 ## 状态与停止
 
@@ -93,6 +93,8 @@ powershell -NoProfile -STA -ExecutionPolicy Bypass -File windows/start-bridge.ps
 `doctor` 在禁止所有 `fetch` 网络调用的条件下运行真实本地模型，检查中英翻译与代码保护。普通测试使用模拟模型，覆盖代码分段、长度限制、串行推理、失败恢复、本地请求鉴权及账号模式配置备份。
 
 界面集成针对 Windows Claude Desktop 2.37337.1 的普通 Chat 开发。macOS / Linux 尚不支持伴随窗口；Claude 界面结构变化时可能需要更新辅助功能定位。
+
+实机发送、回译、代码与剪贴板恢复的验证范围见[本机验收记录](docs/verification.md)。
 
 模型来源：[中译英模型](https://huggingface.co/Xenova/opus-mt-zh-en)、[英译中模型](https://huggingface.co/Xenova/opus-mt-en-zh)、[Transformers.js](https://huggingface.co/docs/transformers.js/)。模型权重由各自作者按其许可证发布，不随源码分发。
 
