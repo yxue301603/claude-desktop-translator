@@ -10,4 +10,7 @@ $references=@(
   [System.Windows.Rect].Assembly.Location
 )
 Add-Type -Path (Join-Path $PSScriptRoot 'TranslatorBridge.cs') -ReferencedAssemblies $references
-if(-not $CompileOnly) { [ClaudeOfflineTranslator.DesktopBridge]::Run($Config) }
+if(-not $CompileOnly) {
+  $version=(Get-Content (Join-Path $PSScriptRoot '../package.json') -Raw | ConvertFrom-Json).version
+  [ClaudeOfflineTranslator.DesktopBridge]::Run($Config,$version)
+}

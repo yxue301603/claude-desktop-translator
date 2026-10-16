@@ -1,6 +1,6 @@
 {
   "name": "claude-desktop-translator",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Offline Chinese/English companion for the signed-in Claude Desktop app on Windows",
   "type": "module",
   "private": true,

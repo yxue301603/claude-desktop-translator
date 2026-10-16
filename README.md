@@ -41,6 +41,8 @@ node scripts/download-models.mjs --gguf C:\Models\Hy-MT2-1.8B-Q4_K_M.gguf
 3. 插件会显示实际提交的英文，并填入 Claude 输入框、校验内容后发送。
 4. 回答结束后，中文译文自动显示在插件窗口。关闭“自动读取”可暂停读取回答。
 
+窗口标题显示当前版本（例如 `v0.3.1`）。0.3.1 修复了只翻译首句的问题：读取消息正文，不再把辅助功能的首句摘要当成整篇回答；正文停止变化后再翻译，后续正文发生变化时会重新翻译。
+
 也可以在 Claude 输入框先写中文，再点击伴随窗口的“翻译并发送给 Claude”；这种情况下请保持伴随窗口自己的输入区为空。在伴随窗口写了文字时，如果 Claude 输入框还有其他草稿，插件会停止发送，避免覆盖草稿。
 
 请保持 Windows 解锁且 Claude 窗口可交互。焦点校验失败时不会提交，中文输入会保留。
@@ -74,6 +76,8 @@ npm run stop
 
 从 0.2.0 升级时，先运行 `npm run stop`，安装并启动 Ollama，执行 `npm run models`，然后重新打开启动器。旧的 OPUS-MT 缓存不再使用，不会自动删除用户文件。
 
+从 0.3.0 升级到 0.3.1：关闭翻译伴随窗口，在项目目录运行 `git pull --ff-only`，再双击 `启动翻译.cmd`。检查标题是否显示 `v0.3.1`；无需重新下载翻译模型。
+
 从旧版 0.1.0 升级时，先停用并卸载旧的 Code 辅助插件：
 
 ```powershell
@@ -90,9 +94,12 @@ node --test
 npm run doctor
 npm run accuracy
 powershell -NoProfile -STA -ExecutionPolicy Bypass -File windows/start-bridge.ps1 -Config unused -CompileOnly
+powershell -NoProfile -STA -ExecutionPolicy Bypass -File test/windows/test-bridge.ps1
 ```
 
 `doctor` 运行真实本地模型，并检查测试进程的推理请求全部指向回环地址。`accuracy` 生成 20 条真实双向译文，包含否定、条件、跨段指代、数值、Markdown 和代码，结果写入忽略提交的 `.local/accuracy-results.json`；每条都有待核对的句意要求。脚本通过仅说明调用和代码完整性通过，**不自动把语义准确率标成通过**。普通回归测试使用模拟模型，覆盖上下文、完整性拒绝、串行推理、失败恢复、本地鉴权和账号配置备份。
+
+Windows 回归测试另用独立辅助功能窗口验证：从原始祖先定位正文、提取多个文本节点、排除正文外推广文字，以及禁止首句摘要替代正文；同时检查生成等待、正文增长、失败重试和会话切换。它不打开 Claude，不提交消息，也不调用翻译模型。
 
 界面集成针对 Windows Claude Desktop 2.37337.1 的普通 Chat 开发。macOS / Linux 尚不支持伴随窗口；Claude 界面结构变化时可能需要更新辅助功能定位。
 
