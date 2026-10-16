@@ -9,7 +9,7 @@ export function createOfflineService({ token, translator }) {
     const candidate = Buffer.from(request.headers['x-local-token'] || '');
     const expected = Buffer.from(token);
     if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) return json(401, { error: 'Unauthorized local request' });
-    if (request.method === 'GET' && request.url === '/status') return json(200, { service: 'claude-offline-translator', offline: true, ...metrics });
+    if (request.method === 'GET' && request.url === '/status') return json(200, { service: 'claude-offline-translator', offline: true, model: translator.model, ...metrics });
     if (request.method === 'POST' && request.url === '/shutdown') {
       if (metrics.active) return json(409, { error: 'Translations are still active' });
       json(200, { stopped: true }); server.close(); server.closeIdleConnections(); return;
@@ -34,7 +34,7 @@ export function createOfflineService({ token, translator }) {
       } finally { metrics.active--; }
     } catch {
       metrics.failures++;
-      if (!response.destroyed) json(500, { error: 'Offline translation failed. Check that both local models are installed.' });
+      if (!response.destroyed) json(500, { error: 'Local translation failed or did not preserve the complete text. Run npm run doctor to inspect the local runtime.' });
     }
   });
   return { server, metrics };

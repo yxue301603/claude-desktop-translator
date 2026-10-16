@@ -1,6 +1,6 @@
 {
   "name": "claude-desktop-translator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Offline Chinese/English companion for the signed-in Claude Desktop app on Windows",
   "type": "module",
   "private": true,
@@ -16,11 +16,9 @@
     "models": "node scripts/download-models.mjs",
     "test": "node --test",
     "doctor": "node scripts/offline-smoke.mjs",
+    "accuracy": "node scripts/accuracy-check.mjs",
     "status": "node bin/offline.mjs status",
     "stop": "node bin/offline.mjs stop"
   },
-  "license": "MIT",
-  "dependencies": {
-    "@huggingface/transformers": "4.3.1"
-  }
+  "license": "MIT"
 }

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export function protectLiterals(text) {
   const literals = [];
   const nonce = createHash('sha256').update(text).digest('hex').slice(0, 12);
-  const pattern = /(^|\n)([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\2\3[^\n]*(?=\n|$)|$)|(`+)[^\n]*?\4|https?:\/\/[^\s<>]+|(?:[A-Za-z]:\\|(?<![\p{L}\p{N}])(?:\.\.?\/|\/))[\w\u3400-\u9fff.@\-\\/]+|<system-reminder>[\s\S]*?<\/system-reminder>|<[^>\n]+>/gu;
+  const pattern = /(^|\n)([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\2\3[^\n]*(?=\n|$)|$)|(`+)[^\n]*?\4|https?:\/\/[^\s<>，。；！？、（）【】《》]+|(?:[A-Za-z]:\\|(?<![\p{L}\p{N}])(?:\.\.?\/|\/))[\w\u3400-\u9fff.@\-\\/]+|<system-reminder>[\s\S]*?<\/system-reminder>|<[^>\n]+>/gu;
   const protectedText = text.replace(pattern, match => {
     const leading = match.startsWith('\n') ? '\n' : '';
     const literal = leading ? match.slice(1) : match;

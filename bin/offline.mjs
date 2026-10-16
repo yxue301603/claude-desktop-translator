@@ -6,7 +6,8 @@ import { spawn } from 'node:child_process';
 import { open, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { exists, readJson, writeJson } from '../src/config.mjs';
-import { OfflineTranslator } from '../src/offline-engine.mjs';
+import { OfflineTranslator, modelId } from '../src/offline-engine.mjs';
+import { ensureRuntime } from '../src/ollama-process.mjs';
 import { createOfflineService } from '../src/offline-service.mjs';
 import { useOfficialAccount } from '../src/account-mode.mjs';
 
@@ -25,16 +26,24 @@ async function operation(config, route, method = 'GET', body) {
   return result;
 }
 async function ready(config) {
-  try { return Boolean(await operation(config, '/status')); } catch { return false; }
+  try { return (await operation(config, '/status')).model === modelId; } catch { return false; }
 }
 async function start(config) {
   if (await ready(config)) return;
+  await ensureRuntime();
+  let existing;
+  try { existing = await operation(config, '/status'); } catch { /* not running */ }
+  if (existing?.service === 'claude-offline-translator') {
+    if (existing.active) throw new Error('An older translation is still running. Wait for it to finish and relaunch.');
+    await operation(config, '/shutdown', 'POST');
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
   await mkdir(directory, { recursive: true });
   const log = await open(path.join(directory, 'offline-service.log'), 'a');
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'serve'], { detached: true, windowsHide: true, stdio: ['ignore', log.fd, log.fd] });
   child.unref(); await log.close();
   for (let i = 0; i < 80; i++) { if (await ready(config)) return; await new Promise(resolve => setTimeout(resolve, 250)); }
-  throw new Error('Offline service did not start. Run npm run models first.');
+  throw new Error('Offline service did not start. Start Ollama and run npm run models first.');
 }
 async function main() {
   const config = await settings();
