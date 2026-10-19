@@ -1,6 +1,6 @@
-param([Parameter(Mandatory=$true)][string]$Config,[switch]$CompileOnly)
+param([Parameter(Mandatory=$true)][string]$Config,[switch]$CompileOnly,[int]$OwnerPid=0,[string]$OwnerLease='')
 $ErrorActionPreference='Stop'
-Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase,System.Windows.Forms,System.Drawing,System.Web.Extensions
+Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase,System.Windows.Forms,System.Drawing,System.Web.Extensions,System.Security
 $references=@(
   [System.Windows.Forms.Form].Assembly.Location,
   [System.Drawing.Point].Assembly.Location,
@@ -8,9 +8,10 @@ $references=@(
   [System.Windows.Automation.AutomationElement].Assembly.Location,
   [System.Windows.Automation.AutomationIdentifier].Assembly.Location,
   [System.Windows.Rect].Assembly.Location
+  [System.Security.Cryptography.ProtectedData].Assembly.Location
 )
 Add-Type -Path (Join-Path $PSScriptRoot 'TranslatorBridge.cs') -ReferencedAssemblies $references
 if(-not $CompileOnly) {
   $version=(Get-Content (Join-Path $PSScriptRoot '../package.json') -Raw | ConvertFrom-Json).version
-  [ClaudeOfflineTranslator.DesktopBridge]::Run($Config,$version)
+  [ClaudeOfflineTranslator.DesktopBridge]::Run($Config,$version,$OwnerPid,$OwnerLease)
 }

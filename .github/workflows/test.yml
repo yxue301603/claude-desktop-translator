@@ -16,8 +16,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test
+      - run: npm ci --ignore-scripts
+      - run: npm test
       - name: Test Windows companion capture
         if: runner.os == 'Windows'
         shell: powershell
         run: .\test\windows\test-bridge.ps1
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - run: npm run build:extension
+      - run: npm run verify:extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-desktop-translator-mcpb
+          path: |
+            artifacts/*.mcpb
+            artifacts/SHA256SUMS.txt

@@ -1,0 +1,27 @@
+{
+  "version": "0.4.0",
+  "date": "2026-10-19",
+  "mode": "account",
+  "ollamaRunning": false,
+  "review": "Manual semantic review of these two real desktop replies; not a general accuracy score.",
+  "cases": [
+    {
+      "case": "four-sentence-introduction",
+      "source": "请用英语分四句话介绍你自己：第一句说明身份；第二句说明你可以协助写作和解释代码；第三句提醒你可能会犯错；第四句询问我希望完成什么任务。不要使用工具，不要执行任何操作。",
+      "englishInput": "Please introduce yourself in English in four sentences: the first sentence states your identity; the second sentence says you can help with writing and explaining code; the third sentence warns that you may make mistakes; the fourth sentence asks what task I would like to accomplish. Do not use tools and do not perform any actions.",
+      "englishAnswer": "I am Claude, an AI assistant made by Anthropic. I can help you with writing and with explaining code. I can make mistakes, so please double-check anything important before relying on it. What task would you like to accomplish?",
+      "text": "我是 Claude，由 Anthropic 开发的 AI 助手。我可以协助你写作，也可以为你解释代码。我可能会犯错，所以在依赖重要内容之前，请务必再次核实。你希望完成什么任务呢？",
+      "chineseDisplayMatches": true,
+      "wholeSourceSubmitted": true
+    },
+    {
+      "case": "conditions-numbers-and-code",
+      "source": "请用英语解释以下 JavaScript，并原样返回代码。最后用一句话复述这些限制：只有测试通过且耗时不超过 250 毫秒时才能继续；不要执行代码、删除文件或上传数据。不要使用工具。\n```js\nconst message = \"hello\";\nconsole.log(message);\n```",
+      "englishInput": "Please explain the following JavaScript in English and return the code as is. At the end, restate these restrictions in one sentence: you may proceed only if the tests pass and take no more than 250 milliseconds; do not execute the code, delete files, or upload data. Do not use tools.\n```\nconst message = \"hello\";\nconsole.log(message);\n```",
+      "englishAnswer": "Here is the explanation of the code. The first line declares a constant named `message` and assigns it the string “hello”. The second line calls `console.log`, which prints the value of`message` to the console, so the output would be `hello`.Here is the code, returned as is:\n```\nconst message = \"hello\";\nconsole.log(message);\n```\nRestrictions: you may proceed only if the tests pass and take no more than 250 milliseconds, and the code must not be executed, files must not be deleted, and data must not be uploaded.",
+      "text": "下面是对这段代码的解释。第一行声明了一个名为 `message` 的常量，并将字符串 “hello” 赋给它。第二行调用了 `console.log`，它会把 `message` 的值打印到控制台，因此输出将是 `hello`。下面是原样返回的代码：\n```\nconst message = \"hello\";\nconsole.log(message);\n```\n限制条件：只有测试通过且耗时不超过 250 毫秒时才能继续，并且不得执行代码、不得删除文件、不得上传数据。",
+      "chineseDisplayMatches": true,
+      "wholeSourceSubmitted": true
+    }
+  ]
+}

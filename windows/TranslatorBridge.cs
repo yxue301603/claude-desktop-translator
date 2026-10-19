@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -20,11 +21,18 @@ namespace ClaudeOfflineTranslator
     {
         private readonly string endpoint;
         private readonly string token;
+        private readonly string configFile;
+        private readonly string version;
+        private readonly int ownerPid;
+        private readonly string ownerLease;
+        private readonly string draftFile;
+        private volatile bool accountMode;
         private readonly Label status = new Label();
         private readonly CheckBox automatic = new CheckBox();
         private readonly TextBox source = new TextBox();
         private readonly TextBox english = new TextBox();
         private readonly RichTextBox chinese = new RichTextBox();
+        private readonly Label submissionLabel = new Label();
         private readonly System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer();
         private volatile Snapshot snapshot;
         private volatile bool enabled = true;
@@ -48,7 +56,7 @@ namespace ClaudeOfflineTranslator
             public string Context;
         }
 
-        public static void Run(string configFile, string version)
+        public static void Run(string configFile, string version, int ownerPid, string ownerLease)
         {
             bool created;
             using (var mutex = new Mutex(true, "Local\\ClaudeDesktopOfflineTranslator", out created))
@@ -57,7 +65,7 @@ namespace ClaudeOfflineTranslator
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(configFile));
-                var form = new DesktopBridge(Convert.ToInt32(config["port"]), Convert.ToString(config["token"]), version);
+                var form = new DesktopBridge(Convert.ToInt32(config["port"]), Convert.ToString(config["token"]), version, configFile, ownerPid, ownerLease);
                 // A launcher may hide its PowerShell host via STARTUPINFO. Show
                 // the companion explicitly after that initial show is consumed.
                 EventHandler show = null;
@@ -71,11 +79,12 @@ namespace ClaudeOfflineTranslator
             }
         }
 
-        private DesktopBridge(int port, string localToken, string version)
+        private DesktopBridge(int port, string localToken, string appVersion, string configPath, int parentPid, string lease)
         {
             endpoint = "http://127.0.0.1:" + port;
             token = localToken;
-            Text = "Claude 中英翻译 · 离线 · v" + version;
+            configFile = configPath; version = appVersion; ownerPid = parentPid; ownerLease = lease;
+            draftFile = Path.Combine(Path.GetDirectoryName(configFile), "companion-draft.bin");
             Size = new Size(470, 790);
             MinimumSize = new Size(380, 650);
             Font = new Font("Microsoft YaHei UI", 10);
@@ -127,11 +136,35 @@ namespace ClaudeOfflineTranslator
             layout.Controls.Add(new Label { Text = "中文输入 · Enter 发送，Shift+Enter 换行", Dock = DockStyle.Fill }, 0, 2);
             layout.Controls.Add(source, 0, 3);
             layout.Controls.Add(translateButton, 0, 4);
-            layout.Controls.Add(new Label { Text = "实际提交的英文", Dock = DockStyle.Fill }, 0, 5);
+            submissionLabel.Dock = DockStyle.Fill;
+            layout.Controls.Add(submissionLabel, 0, 5);
             layout.Controls.Add(english, 0, 6);
             layout.Controls.Add(new Label { Text = "Claude 回答的中文译文", Dock = DockStyle.Fill }, 0, 7);
             layout.Controls.Add(chinese, 0, 8);
             Controls.Add(layout);
+            RefreshMode();
+            try
+            {
+                if (File.Exists(draftFile))
+                {
+                    source.Text = Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(draftFile), null, DataProtectionScope.CurrentUser));
+                    status.Text = "已恢复未发送草稿 · Enter 发送，Shift+Enter 换行";
+                }
+            }
+            catch { status.Text = "无法恢复加密草稿；原草稿文件仍保留。"; }
+            source.TextChanged += delegate
+            {
+                try
+                {
+                    if (source.TextLength == 0) { File.Delete(draftFile); return; }
+                    var encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(source.Text), null, DataProtectionScope.CurrentUser);
+                    var pending = draftFile + ".tmp";
+                    File.WriteAllBytes(pending, encrypted);
+                    if (File.Exists(draftFile)) File.Replace(pending, draftFile, null);
+                    else File.Move(pending, draftFile);
+                }
+                catch { status.Text = "草稿保存失败，请保留原文后再关闭窗口。"; }
+            };
             Shown += delegate
             {
                 poll.Interval = 500;
@@ -145,6 +178,18 @@ namespace ClaudeOfflineTranslator
                 poll.Stop();
                 RestoreClipboard();
             };
+        }
+
+        private void RefreshMode()
+        {
+            var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(configFile));
+            bool selected = config.ContainsKey("mode") && Convert.ToString(config["mode"]) == "account";
+            if (Text.StartsWith("Claude 中英翻译") && selected == accountMode) return;
+            accountMode = selected;
+            Text = "Claude 中英翻译 · " + (accountMode ? "账号双语" : "离线") + " · v" + version;
+            submissionLabel.Text = accountMode ? "实际提交内容（含中文原文，由 Claude 生成双语回答）" : "实际提交的英文（本机预翻译）";
+            automatic.Text = accountMode ? "自动提取 Claude 双语回答中的完整中文" : "自动读取 Claude 回答并离线翻译为中文";
+            answers.Reset();
         }
 
         private static bool IsComposer(AutomationElement element)
@@ -166,6 +211,23 @@ namespace ClaudeOfflineTranslator
 
         private void Poll(object sender, EventArgs args)
         {
+            if (Volatile.Read(ref sending) == 0 && Volatile.Read(ref translatingAnswer) == 0)
+            {
+                try { RefreshMode(); } catch { status.Text = "翻译设置暂不可用，等待恢复…"; return; }
+            }
+            if (ownerPid > 0)
+            {
+                bool ownerAlive = true;
+                try { ownerAlive = !Process.GetProcessById(ownerPid).HasExited; } catch { ownerAlive = false; }
+                if (!string.IsNullOrEmpty(ownerLease) && !File.Exists(ownerLease)) ownerAlive = false;
+                if (!ownerAlive)
+                {
+                    enabled = false; automatic.Checked = false;
+                    if (source.TextLength == 0 && Volatile.Read(ref sending) == 0) { Close(); return; }
+                    status.Text = "扩展已停用；未发送草稿已加密保存，下次打开恢复。";
+                    return;
+                }
+            }
             if (Interlocked.CompareExchange(ref polling, 1, 0) != 0) return;
             Task.Run(delegate
             {
@@ -196,6 +258,7 @@ namespace ClaudeOfflineTranslator
                         // sentence. It identifies the author, never the answer text.
                         var key = process.Id + "|" + ReadContext(window) + "|" + string.Join("-", message.GetRuntimeId());
                         var markdown = ReadResponse(message);
+                        if (accountMode && !Regex.IsMatch(markdown, @"CDT_[a-f0-9]{16}_END\b")) return;
                         var now = Stopwatch.GetTimestamp() * 1000 / Stopwatch.Frequency;
                         if (!answers.Observe(key, markdown, stop, now)) return;
                         Interlocked.Exchange(ref translatingAnswer, 1);
@@ -227,14 +290,7 @@ namespace ClaudeOfflineTranslator
             // Claude turns typed backticks into a code span and adds a zero-width
             // caret marker. Reconstruct only code spans identified by their font;
             // code characters must still match exactly before sending.
-            var result = new StringBuilder();
-            var code = new StringBuilder();
-            Action flushCode = delegate
-            {
-                if (code.Length == 0) return;
-                result.Append('`').Append(code).Append('`');
-                code.Clear();
-            };
+            var result = new ComposerText();
             foreach (AutomationElement node in input.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)))
             {
                 object pattern;
@@ -242,10 +298,16 @@ namespace ClaudeOfflineTranslator
                 var range = ((TextPattern)pattern).DocumentRange;
                 var text = range.GetText(-1);
                 var font = Convert.ToString(range.GetAttributeValue(TextPattern.FontNameAttribute));
-                if (Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase)) code.Append(text);
-                else { flushCode(); result.Append(text.Replace("\u200b", "")); }
+                var block = node;
+                var parent = TreeWalker.RawViewWalker.GetParent(block);
+                while (parent != null && !Automation.Compare(parent, input))
+                {
+                    block = parent;
+                    parent = TreeWalker.RawViewWalker.GetParent(block);
+                }
+                if (parent == null) return false;
+                result.Add(string.Join("-", block.GetRuntimeId()), text, Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase));
             }
-            flushCode();
             return NormalizeLines(result.ToString()) == NormalizeLines(expected);
         }
 
@@ -254,9 +316,10 @@ namespace ClaudeOfflineTranslator
             return text.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
         }
 
-        private string Translate(string text, string target)
+        private string ProcessText(string text, string target)
         {
-            var request = (HttpWebRequest)WebRequest.Create(endpoint + "/translate");
+            var route = accountMode ? (target == "en" ? "/prepare" : "/extract") : "/translate";
+            var request = (HttpWebRequest)WebRequest.Create(endpoint + route);
             request.Proxy = null;
             request.Method = "POST";
             request.ContentType = "application/json; charset=utf-8";
@@ -283,12 +346,12 @@ namespace ClaudeOfflineTranslator
             if (string.IsNullOrWhiteSpace(original)) original = desktopDraft;
             else if (!string.IsNullOrWhiteSpace(desktopDraft)) { sending = 0; status.Text = "Claude 输入框中有草稿，请先保存或清空。"; return; }
             if (string.IsNullOrWhiteSpace(original)) { sending = 0; return; }
-            status.Text = "正在本机翻译输入…";
+            status.Text = accountMode ? "正在准备双语请求（含中文原文）…" : "正在本机翻译输入…";
             Task.Run(delegate
             {
                 try
                 {
-                    var translated = Translate(original, "en");
+                    var translated = ProcessText(original, "en");
                     Ui(delegate
                     {
                         try
@@ -326,7 +389,7 @@ namespace ClaudeOfflineTranslator
                                     RestoreClipboard();
                                     ((InvokePattern)send.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
                                     source.Clear();
-                                    status.Text = "英文已由 Claude 官方客户端提交。";
+                                    status.Text = accountMode ? "双语请求已由 Claude 官方客户端提交。" : "英文已由 Claude 官方客户端提交。";
                                     Interlocked.Exchange(ref sending, 0);
                                 }
                                 catch (Exception error) { timer.Stop(); timer.Dispose(); status.Text = error.Message; Interlocked.Exchange(ref sending, 0); RestoreClipboard(); }
@@ -336,7 +399,7 @@ namespace ClaudeOfflineTranslator
                         catch (Exception error) { status.Text = error.Message; sending = 0; RestoreClipboard(); }
                     });
                 }
-                catch { Ui(delegate { status.Text = "离线翻译失败，原文未提交。请检查本地模型。"; sending = 0; }); }
+                catch { Ui(delegate { status.Text = accountMode ? "双语请求准备失败，原文未提交。" : "离线翻译失败，原文未提交。请检查本地模型。"; sending = 0; }); }
             });
         }
 
@@ -345,15 +408,15 @@ namespace ClaudeOfflineTranslator
             DebugStage("capture_enter");
             try
             {
-                status.Text = "正在本机翻译 Claude 回答…";
+                status.Text = accountMode ? "正在提取完整中文回答…" : "正在本机翻译 Claude 回答…";
                 DebugStage("translation_requested");
                 Task.Run(delegate
                 {
                     try
                     {
-                        var translated = Translate(markdown, "zh");
+                        var translated = ProcessText(markdown, "zh");
                         answers.Translated(key, markdown);
-                        Ui(delegate { chinese.Text = translated; status.Text = "中文译文已更新 · 本地离线模型"; });
+                        Ui(delegate { chinese.Text = translated; status.Text = accountMode ? "中文译文已更新 · Claude 官方账号" : "中文译文已更新 · 本地离线模型"; });
                     }
                     catch { Ui(delegate { status.Text = "回答翻译失败；Claude 原文仍保留在原窗口。"; }); }
                     finally { Interlocked.Exchange(ref translatingAnswer, 0); }
@@ -483,6 +546,34 @@ namespace ClaudeOfflineTranslator
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, NativeInput[] inputs, int size);
     }
 
+    // Chromium's document range omits empty paragraph nodes. Reconstruct the
+    // explicit paragraph boundaries instead of ignoring whitespace differences.
+    internal sealed class ComposerText
+    {
+        private readonly StringBuilder result = new StringBuilder();
+        private readonly StringBuilder code = new StringBuilder();
+        private string lastBlock;
+
+        private void FlushCode()
+        {
+            if (code.Length == 0) return;
+            result.Append('`').Append(code).Append('`');
+            code.Clear();
+        }
+
+        public void Add(string block, string text, bool monospace)
+        {
+            if (lastBlock != null && block != lastBlock) { FlushCode(); result.Append('\n'); }
+            lastBlock = block;
+            // A lone newline is the accessibility placeholder for an empty p.
+            if (text == "\n" || text == "\r\n") text = "";
+            if (monospace) code.Append(text);
+            else { FlushCode(); result.Append(text.Replace("\u200b", "")); }
+        }
+
+        public override string ToString() { FlushCode(); return result.ToString(); }
+    }
+
     internal sealed class AnswerTracker
     {
         private readonly object sync = new object();
@@ -505,6 +596,11 @@ namespace ClaudeOfflineTranslator
         public void Translated(string key, string text)
         {
             lock (sync) { translatedKey = key; translatedText = text; }
+        }
+
+        public void Reset()
+        {
+            lock (sync) { observedKey = observedText = translatedKey = translatedText = null; }
         }
     }
 }

@@ -1,7 +1,7 @@
 {
   "name": "claude-desktop-translator",
-  "version": "0.3.1",
-  "description": "Offline Chinese/English companion for the signed-in Claude Desktop app on Windows",
+  "version": "0.4.0",
+  "description": "Claude Desktop MCPB extension with account bilingual and offline translation modes",
   "type": "module",
   "private": true,
   "engines": {
@@ -18,7 +18,19 @@
     "doctor": "node scripts/offline-smoke.mjs",
     "accuracy": "node scripts/accuracy-check.mjs",
     "status": "node bin/offline.mjs status",
-    "stop": "node bin/offline.mjs stop"
+    "stop": "node bin/offline.mjs stop",
+    "extension": "node bin/extension.mjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "verify:extension": "node scripts/verify-extension.mjs"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2"
+  },
+  "overrides": {
+    "tmp": "^0.2.6"
+  }
 }

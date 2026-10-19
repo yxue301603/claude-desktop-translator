@@ -1,0 +1,35 @@
+{
+  "manifest_version": "0.3",
+  "name": "claude-desktop-translator",
+  "display_name": "Claude 中英翻译",
+  "version": "0.4.0",
+  "description": "Claude 桌面中英双语扩展：账号双语模式无需本地模型，另可选离线预翻译。",
+  "long_description": "安装并启用后自动打开 Windows 翻译伴随窗口。account 模式由当前 Claude 账号生成英文理解、英文回答和完整中文译文，不需要 Ollama，实际提交会包含中文原文。offline 模式在本机先译成英文再发送，需要已安装的 Hy-MT2 离线模型。本扩展保留伴随窗口，不修改 Claude 界面或登录凭据。",
+  "author": { "name": "yxue301603", "url": "https://github.com/yxue301603" },
+  "repository": { "type": "git", "url": "https://github.com/yxue301603/claude-desktop-translator" },
+  "homepage": "https://github.com/yxue301603/claude-desktop-translator",
+  "license": "MIT",
+  "privacy_policies": ["https://github.com/yxue301603/claude-desktop-translator/blob/main/docs/privacy.md"],
+  "server": {
+    "type": "node",
+    "entry_point": "bin/extension.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/bin/extension.mjs"],
+      "env": { "CDT_OFFLINE_MODE": "${user_config.offline_mode}", "CDT_MANUAL_START": "${user_config.manual_start}" }
+    }
+  },
+  "compatibility": { "platforms": ["win32"], "runtimes": { "node": ">=22" } },
+  "tools": [
+    { "name": "translator_status", "description": "查看翻译模式和运行状态" },
+    { "name": "open_translation_window", "description": "打开翻译伴随窗口，不发送聊天消息" },
+    { "name": "prepare_bilingual_request", "description": "生成交给当前 Claude 账号处理的双语请求" },
+    { "name": "extract_bilingual_response", "description": "从完整双语回答中提取中文" },
+    { "name": "translate_text_offline", "description": "使用已安装的本地模型翻译，仅限 offline 模式" }
+  ],
+  "prompts_generated": true,
+  "user_config": {
+    "offline_mode": { "type": "boolean", "title": "使用离线预翻译（需要 Ollama）", "description": "关闭：由当前 Claude 账号生成双语回答，提交含中文原文，无需本地模型。打开：本机先译成英文再发送，需要 Ollama。", "default": false },
+    "manual_start": { "type": "boolean", "title": "仅启用 MCP 工具，不自动打开窗口", "description": "默认关闭，启用扩展即打开翻译窗口，但不发送消息。打开此选项后，可手动调用 open_translation_window。", "default": false }
+  }
+}

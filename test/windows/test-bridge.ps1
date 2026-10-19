@@ -15,6 +15,17 @@ if($Fixture){
 $type=[ClaudeOfflineTranslator.DesktopBridge].Assembly.GetType('ClaudeOfflineTranslator.AnswerTracker')
 $tracker=[Activator]::CreateInstance($type,$true)
 function Assert($condition,$message){if(-not $condition){throw $message}}
+$composerType=[ClaudeOfflineTranslator.DesktopBridge].Assembly.GetType('ClaudeOfflineTranslator.ComposerText')
+$composer=[Activator]::CreateInstance($composerType,$true)
+$composer.Add('p1','First line.',$false)
+$composer.Add('p2',"`n",$false)
+$composer.Add('p3',"`n",$false)
+$composer.Add('p4','Keep ',$false)
+$composer.Add('p4','npm test',$true)
+$composer.Add('p4',([char]0x200b).ToString()+', 250 ms.',$false)
+Assert ($composer.ToString() -eq "First line.`n`n`nKeep ``npm test``, 250 ms.") 'Composer must preserve empty paragraphs, inline code, punctuation and numbers'
+Assert ($composer.ToString() -ne "First line.`nKeep ``npm test``, 250 ms.") 'Missing paragraphs must not compare equal'
+Assert ($composer.ToString() -ne "First line.`n`n`nKeep ``npm test``, 25 ms.") 'Changed literals must not compare equal'
 Assert (-not $tracker.Observe('reply','First sentence.', $false, 0)) 'Wait for stable body'
 Assert (-not $tracker.Observe('reply','First sentence. Second sentence.', $true, 2000)) 'Streaming must wait'
 Assert (-not $tracker.Observe('reply','First sentence. Second sentence.', $false, 3000)) 'Wait after streaming'
