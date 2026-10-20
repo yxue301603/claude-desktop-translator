@@ -27,6 +27,7 @@ namespace ClaudeOfflineTranslator
         private readonly string ownerLease;
         private readonly string draftFile;
         private volatile bool accountMode;
+        private string translationMode;
         private readonly Label status = new Label();
         private readonly CheckBox automatic = new CheckBox();
         private readonly TextBox source = new TextBox();
@@ -40,7 +41,7 @@ namespace ClaudeOfflineTranslator
         private int sending;
         private int translatingAnswer;
         private Action restoreClipboard;
-        private readonly AnswerTracker answers = new AnswerTracker();
+        private readonly OutputLedger outputs = new OutputLedger();
         private void DebugStage(string stage)
         {
             if (Environment.GetEnvironmentVariable("CDT_DEBUG") == "1")
@@ -128,7 +129,7 @@ namespace ClaudeOfflineTranslator
             chinese.Dock = DockStyle.Fill;
             chinese.BackColor = Color.FromArgb(250, 249, 246);
             chinese.BorderStyle = BorderStyle.FixedSingle;
-            chinese.AccessibleName = "Chinese response translation";
+            chinese.AccessibleName = "Chinese output timeline";
             var translateButton = new Button { Text = "翻译并发送给 Claude", Dock = DockStyle.Fill };
             translateButton.Click += delegate { PrepareSend(true); };
             layout.Controls.Add(status, 0, 0);
@@ -139,7 +140,12 @@ namespace ClaudeOfflineTranslator
             submissionLabel.Dock = DockStyle.Fill;
             layout.Controls.Add(submissionLabel, 0, 5);
             layout.Controls.Add(english, 0, 6);
-            layout.Controls.Add(new Label { Text = "Claude 回答的中文译文", Dock = DockStyle.Fill }, 0, 7);
+            var outputHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            outputHeader.Controls.Add(new Label { Text = "各条输出的中文译文（含可读取思考）", AutoSize = true });
+            var refresh = new Button { Text = "刷新", AutoSize = true, Height = 24 };
+            refresh.Click += delegate { outputs.Retry(); Poll(null, EventArgs.Empty); };
+            outputHeader.Controls.Add(refresh);
+            layout.Controls.Add(outputHeader, 0, 7);
             layout.Controls.Add(chinese, 0, 8);
             Controls.Add(layout);
             RefreshMode();
@@ -167,7 +173,7 @@ namespace ClaudeOfflineTranslator
             };
             Shown += delegate
             {
-                poll.Interval = 500;
+                poll.Interval = 1000;
                 poll.Tick += Poll;
                 poll.Start();
                 Poll(null, EventArgs.Empty);
@@ -183,13 +189,13 @@ namespace ClaudeOfflineTranslator
         private void RefreshMode()
         {
             var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(configFile));
-            bool selected = config.ContainsKey("mode") && Convert.ToString(config["mode"]) == "account";
-            if (Text.StartsWith("Claude 中英翻译") && selected == accountMode) return;
-            accountMode = selected;
-            Text = "Claude 中英翻译 · " + (accountMode ? "账号双语" : "离线") + " · v" + version;
-            submissionLabel.Text = accountMode ? "实际提交内容（含中文原文，由 Claude 生成双语回答）" : "实际提交的英文（本机预翻译）";
-            automatic.Text = accountMode ? "自动提取 Claude 双语回答中的完整中文" : "自动读取 Claude 回答并离线翻译为中文";
-            answers.Reset();
+            var selected = config.ContainsKey("mode") ? Convert.ToString(config["mode"]) : "api";
+            if (selected == translationMode) return;
+            translationMode = selected; accountMode = selected == "account";
+            Text = "Claude 中英翻译 · " + (accountMode ? "旧双语·会发送中文" : selected == "api" ? "API 英文提交" : "离线英文提交") + " · v" + version;
+            submissionLabel.Text = accountMode ? "旧模式：提交含中文原文" : "实际提交英文（含中文字符时停止发送）";
+            automatic.Text = accountMode ? "提取旧双语回答（不支持独立思考回译）" : "自动翻译各条输出和已展开的思考";
+            outputs.Reset(); chinese.Clear();
         }
 
         private static bool IsComposer(AutomationElement element)
@@ -238,33 +244,36 @@ namespace ClaudeOfflineTranslator
                     var window = AutomationElement.FromHandle(process.MainWindowHandle);
                     var input = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)).Cast<AutomationElement>().FirstOrDefault(IsComposer);
                     if (input == null) { snapshot = null; Ui(delegate { status.Text = "等待 Claude 聊天输入框…"; }); return; }
-                    snapshot = new Snapshot { Window = window, Input = input, ProcessId = process.Id, Handle = process.MainWindowHandle, Context = ReadContext(window) };
+                    var context = ReadContext(window);
+                    snapshot = new Snapshot { Window = window, Input = input, ProcessId = process.Id, Handle = process.MainWindowHandle, Context = context };
                     DebugStage("input_connected");
                     Ui(delegate { if (status.Text.StartsWith("正在连接") || status.Text.StartsWith("等待 Claude") || status.Text.StartsWith("请打开 Claude")) status.Text = "已连接 Claude · 使用当前官方账号"; });
-                    if (!enabled || Volatile.Read(ref sending) != 0 || Volatile.Read(ref translatingAnswer) != 0) return;
+                    if (!enabled || Volatile.Read(ref sending) != 0) return;
                     var stop = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)).Cast<AutomationElement>()
                         .Any(e => new[] { "Stop response", "Stop", "停止响应", "停止" }.Contains(e.Current.Name));
                     var messages = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Group)).Cast<AutomationElement>()
                         .Where(e => Regex.IsMatch(e.Current.Name ?? "", @"^Message \d+( of \d+)?$")).ToArray();
                     DebugStage("messages_" + messages.Length);
-                    for (int i = messages.Length - 1; i >= 0; i--)
+                    var blocks = new List<OutputBlock>();
+                    for (int i = 0; i < messages.Length; i++)
                     {
                         var message = messages[i];
-                        var summary = message.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)).Cast<AutomationElement>()
-                            .FirstOrDefault(e => (e.Current.Name ?? "").StartsWith("Claude responded:", StringComparison.Ordinal));
-                        if (summary == null) continue;
                         DebugStage("assistant_found");
-                        // The hidden accessibility summary contains only the first
-                        // sentence. It identifies the author, never the answer text.
-                        var key = process.Id + "|" + ReadContext(window) + "|" + string.Join("-", message.GetRuntimeId());
-                        var markdown = ReadResponse(message);
-                        if (accountMode && !Regex.IsMatch(markdown, @"CDT_[a-f0-9]{16}_END\b")) return;
-                        var now = Stopwatch.GetTimestamp() * 1000 / Stopwatch.Frequency;
-                        if (!answers.Observe(key, markdown, stop, now)) return;
-                        Interlocked.Exchange(ref translatingAnswer, 1);
-                        Ui(delegate { CaptureAnswer(key, markdown); });
-                        break;
+                        var key = process.Id + "|" + context + "|" + string.Join("-", message.GetRuntimeId());
+                        var captured = ReadOutputBlocks(message, key, i + 1, stop && i == messages.Length - 1);
+                        if (captured.Count == 0) continue;
+                        if (accountMode) captured = captured.Where(block => block.Kind == "answer" && Regex.IsMatch(block.Text, @"CDT_[a-f0-9]{16}_END\b")).ToList();
+                        blocks.AddRange(captured);
                     }
+                    Ui(delegate
+                    {
+                        if (!enabled || Volatile.Read(ref sending) != 0) return;
+                        var now = Stopwatch.GetTimestamp() * 1000 / Stopwatch.Frequency;
+                        outputs.Observe(blocks, now);
+                        ShowOutputs();
+                        var next = Volatile.Read(ref translatingAnswer) == 0 ? outputs.Next(now) : null;
+                        if (next != null) { Interlocked.Exchange(ref translatingAnswer, 1); CaptureOutput(next); }
+                    });
                 }
                 catch (Exception error) { DebugStage("poll_error_" + error.GetType().Name); Ui(delegate { if (Volatile.Read(ref sending) == 0) status.Text = "窗口连接：" + error.Message; }); }
                 finally { Interlocked.Exchange(ref polling, 0); }
@@ -318,7 +327,7 @@ namespace ClaudeOfflineTranslator
 
         private string ProcessText(string text, string target)
         {
-            var route = accountMode ? (target == "en" ? "/prepare" : "/extract") : "/translate";
+            var route = target == "en" ? "/prepare" : accountMode ? "/extract" : "/translate";
             var request = (HttpWebRequest)WebRequest.Create(endpoint + route);
             request.Proxy = null;
             request.Method = "POST";
@@ -328,7 +337,19 @@ namespace ClaudeOfflineTranslator
             var bytes = Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(new { text = text, target = target }));
             request.ContentLength = bytes.Length;
             using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
-            using (var response = request.GetResponse())
+            WebResponse received;
+            try { received = request.GetResponse(); }
+            catch (WebException error)
+            {
+                if (error.Response == null) throw new InvalidOperationException("翻译服务未连接，原文未提交。");
+                using (var response = error.Response)
+                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                {
+                    var body = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(reader.ReadToEnd());
+                    throw new InvalidOperationException(body.ContainsKey("error") ? Convert.ToString(body["error"]) : "翻译服务失败，原文未提交。");
+                }
+            }
+            using (var response = received)
             using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
                 return Convert.ToString(new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(reader.ReadToEnd())["text"]);
         }
@@ -346,12 +367,13 @@ namespace ClaudeOfflineTranslator
             if (string.IsNullOrWhiteSpace(original)) original = desktopDraft;
             else if (!string.IsNullOrWhiteSpace(desktopDraft)) { sending = 0; status.Text = "Claude 输入框中有草稿，请先保存或清空。"; return; }
             if (string.IsNullOrWhiteSpace(original)) { sending = 0; return; }
-            status.Text = accountMode ? "正在准备双语请求（含中文原文）…" : "正在本机翻译输入…";
+            status.Text = accountMode ? "旧模式：正在准备含中文原文的请求…" : "正在翻译并校验英文，尚未提交…";
             Task.Run(delegate
             {
                 try
                 {
                     var translated = ProcessText(original, "en");
+                    if (!accountMode) SubmissionGuard.EnglishOnly(translated);
                     Ui(delegate
                     {
                         try
@@ -362,7 +384,7 @@ namespace ClaudeOfflineTranslator
                             english.Text = translated.Replace("\r\n", "\n").Replace("\n", "\r\n");
                             SetForegroundWindow(current.Handle);
                             current.Input.SetFocus();
-                            if (!Automation.Compare(AutomationElement.FocusedElement, current.Input)) throw new InvalidOperationException("Claude 输入框未获得焦点，未提交。请解锁屏幕并打开聊天窗口。");
+                            if (GetForegroundWindow() != current.Handle || !Automation.Compare(AutomationElement.FocusedElement, current.Input)) throw new InvalidOperationException("Claude 输入框未获得焦点，未提交。请解锁屏幕并打开聊天窗口。");
                             DebugStage("input_focus_ready");
                             restoreClipboard = PasteText(translated);
                             DebugStage("english_typed");
@@ -387,6 +409,7 @@ namespace ClaudeOfflineTranslator
                                     }
                                     timer.Stop(); timer.Dispose();
                                     RestoreClipboard();
+                                    if (!accountMode) SubmissionGuard.EnglishOnly(translated);
                                     ((InvokePattern)send.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
                                     source.Clear();
                                     status.Text = accountMode ? "双语请求已由 Claude 官方客户端提交。" : "英文已由 Claude 官方客户端提交。";
@@ -399,27 +422,37 @@ namespace ClaudeOfflineTranslator
                         catch (Exception error) { status.Text = error.Message; sending = 0; RestoreClipboard(); }
                     });
                 }
-                catch { Ui(delegate { status.Text = accountMode ? "双语请求准备失败，原文未提交。" : "离线翻译失败，原文未提交。请检查本地模型。"; sending = 0; }); }
+                catch (Exception error) { Ui(delegate { status.Text = error.Message; sending = 0; }); }
             });
         }
 
-        private void CaptureAnswer(string key, string markdown)
+        private void ShowOutputs()
+        {
+            var rendered = outputs.Render();
+            if (chinese.Text == rendered) return;
+            bool atEnd = chinese.SelectionStart >= chinese.TextLength - 1;
+            int position = chinese.SelectionStart;
+            chinese.Text = rendered;
+            chinese.SelectionStart = atEnd ? chinese.TextLength : Math.Min(position, chinese.TextLength);
+            if (atEnd) chinese.ScrollToCaret();
+        }
+
+        private void CaptureOutput(OutputWork work)
         {
             DebugStage("capture_enter");
             try
             {
-                status.Text = accountMode ? "正在提取完整中文回答…" : "正在本机翻译 Claude 回答…";
+                status.Text = "正在翻译消息 " + work.Block.Number + " · " + OutputLedger.Label(work.Block.Kind) + "…";
                 DebugStage("translation_requested");
                 Task.Run(delegate
                 {
                     try
                     {
-                        var translated = ProcessText(markdown, "zh");
-                        answers.Translated(key, markdown);
-                        Ui(delegate { chinese.Text = translated; status.Text = accountMode ? "中文译文已更新 · Claude 官方账号" : "中文译文已更新 · 本地离线模型"; });
+                        var translated = ProcessText(work.Block.Text, "zh");
+                        Ui(delegate { if (outputs.Complete(work, translated)) { ShowOutputs(); status.Text = "中文输出已更新 · " + (accountMode ? "旧双语模式" : translationMode == "api" ? "翻译 API" : "本地模型"); } });
                     }
-                    catch { Ui(delegate { status.Text = "回答翻译失败；Claude 原文仍保留在原窗口。"; }); }
-                    finally { Interlocked.Exchange(ref translatingAnswer, 0); }
+                    catch (Exception error) { Ui(delegate { outputs.Fail(work, Stopwatch.GetTimestamp() * 1000 / Stopwatch.Frequency, error.Message); ShowOutputs(); status.Text = "输出翻译失败，可点刷新重试。"; }); }
+                    finally { Ui(delegate { Interlocked.Exchange(ref translatingAnswer, 0); }); }
                 });
             }
             catch (Exception error) { DebugStage("capture_error_" + error.GetType().Name); Interlocked.Exchange(ref translatingAnswer, 0); }
@@ -427,35 +460,41 @@ namespace ClaudeOfflineTranslator
 
         private static string ReadResponse(AutomationElement message)
         {
-            var result = new StringBuilder();
-            var code = new StringBuilder();
-            Action flushCode = delegate
-            {
-                if (code.Length == 0) return;
-                var value = code.ToString();
-                result.Append(value.Contains("\n") || value.Length > 100 ? "\n```\n" + value + "\n```\n" : "`" + value + "`");
-                code.Clear();
-            };
+            return string.Concat(ReadOutputBlocks(message, "fixture", 1, false).Where(block => block.Kind == "answer").Select(block => block.Text));
+        }
+
+        private static List<OutputBlock> ReadOutputBlocks(AutomationElement message, string messageKey, int number, bool streaming)
+        {
+            var result = new List<OutputBlock>();
+            var builders = new Dictionary<string, ResponseText>();
+            var all = message.FindAll(TreeScope.Descendants, Condition.TrueCondition).Cast<AutomationElement>().ToArray();
+            var regions = ThinkingRegions(message, all);
             // Chromium exposes raw-only containers whose FindAll(Descendants)
             // returns no children. Enumerate from the message, then classify each
             // text node by its raw ancestry instead of querying that container.
-            var nodes = message.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+            var nodes = all.Where(node => node.Current.ControlType == ControlType.Text);
             foreach (AutomationElement node in nodes)
             {
                 if ((node.Current.ClassName ?? "").Contains("sr-only")) continue;
                 var ancestor = TreeWalker.RawViewWalker.GetParent(node);
                 bool auxiliary = false;
                 bool codeBlock = false;
-                bool inResponse = false;
+                string kind = null, region = null;
                 for (int depth = 0; depth < 64 && ancestor != null && !Automation.Compare(ancestor, message); depth++)
                 {
                     var className = ancestor.Current.ClassName ?? "";
-                    if (ancestor.Current.ControlType == ControlType.ToolBar || ancestor.Current.ControlType == ControlType.Button || className.Split(' ').Contains("sr-only")) { auxiliary = true; break; }
-                    if (className.Split(' ').Contains("font-claude-response")) inResponse = true;
+                    if (ancestor.Current.ControlType == ControlType.ToolBar || ancestor.Current.ControlType == ControlType.Button || Regex.IsMatch(className, @"\bsr-only\b|promotion|upsell", RegexOptions.IgnoreCase)) { auxiliary = true; break; }
+                    object expansion;
+                    if (ancestor.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out expansion) && ((ExpandCollapsePattern)expansion).Current.ExpandCollapseState == ExpandCollapseState.Collapsed) { auxiliary = true; break; }
+                    var identity = string.Join("-", ancestor.GetRuntimeId());
+                    var semantic = className + " " + ancestor.Current.AutomationId;
+                    if (regions.Contains(identity) || Regex.IsMatch(semantic, @"(?:^|[-_ /])(?:thinking|reasoning|thoughts?)(?:$|[-_ /])", RegexOptions.IgnoreCase)) { kind = "thinking"; region = identity; }
+                    else if (kind != "thinking" && Regex.IsMatch(semantic, @"tool[-_/](?:result|output|use)|intermediate|progress-message", RegexOptions.IgnoreCase)) { kind = "intermediate"; region = identity; }
+                    else if (kind == null && className.Split(' ').Contains("font-claude-response")) { kind = "answer"; region = identity; }
                     if ((ancestor.Current.Name ?? "").EndsWith(" code", StringComparison.Ordinal) && (ancestor.Current.ClassName ?? "").Contains("group/copy")) codeBlock = true;
                     ancestor = TreeWalker.RawViewWalker.GetParent(ancestor);
                 }
-                if (auxiliary || !inResponse) continue;
+                if (auxiliary || kind == null) continue;
                 object pattern;
                 var text = node.Current.Name;
                 var font = "";
@@ -468,12 +507,42 @@ namespace ClaudeOfflineTranslator
                 if (string.IsNullOrEmpty(text)) continue;
                 bool monospace = Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase);
                 if (codeBlock && !monospace) continue;
-                if (monospace) code.Append(text);
-                else { flushCode(); result.Append(text); }
+                var key = messageKey + "|" + kind + "|" + region;
+                ResponseText builder;
+                if (!builders.TryGetValue(key, out builder))
+                {
+                    builder = new ResponseText(); builders.Add(key, builder);
+                    result.Add(new OutputBlock { Key = key, Message = messageKey, Number = number, Kind = kind, Streaming = streaming && kind != "thinking" });
+                }
+                builder.Add(text, monospace);
             }
-            flushCode();
-            // An unavailable body must be retried, never replaced by its summary.
-            return result.ToString();
+            foreach (var block in result) block.Text = builders[block.Key].ToString();
+            if (!result.Any(block => block.Kind == "thinking") && all.Any(node => (node.Current.ControlType == ControlType.Button || node.Current.ControlType == ControlType.Group) && Regex.IsMatch(node.Current.Name ?? "", @"^(?:Thought\b|Thinking\b|Reasoning\b|Show thinking\b|思考|已思考)", RegexOptions.IgnoreCase)))
+                result.Insert(0, new OutputBlock { Key = messageKey + "|thinking-unavailable", Message = messageKey, Number = number, Kind = "notice", Text = "此消息的思考内容未暴露。请在 Claude 中手动展开后点刷新；插件不会还原未公开的内部思考。" });
+            return result;
+        }
+
+        private static bool Inside(AutomationElement node, AutomationElement container)
+        {
+            for (int depth = 0; depth < 64 && node != null; depth++, node = TreeWalker.RawViewWalker.GetParent(node)) if (Automation.Compare(node, container)) return true;
+            return false;
+        }
+
+        private static HashSet<string> ThinkingRegions(AutomationElement message, AutomationElement[] nodes)
+        {
+            var result = new HashSet<string>();
+            foreach (var toggle in nodes.Where(node => (node.Current.ControlType == ControlType.Button || node.Current.ControlType == ControlType.Group) && Regex.IsMatch(node.Current.Name ?? "", @"^(?:Thought(?: for)?\b|Thinking\b|Reasoning\b|Show thinking\b|Hide thinking\b|思考|已思考)", RegexOptions.IgnoreCase)))
+            {
+                object pattern;
+                if (!toggle.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern) || ((ExpandCollapsePattern)pattern).Current.ExpandCollapseState != ExpandCollapseState.Expanded) continue;
+                var parent = toggle.Current.ControlType == ControlType.Group ? toggle : TreeWalker.RawViewWalker.GetParent(toggle);
+                for (int depth = 0; depth < 5 && parent != null && !Automation.Compare(parent, message); depth++, parent = TreeWalker.RawViewWalker.GetParent(parent))
+                {
+                    if (!nodes.Any(node => node.Current.ControlType == ControlType.Text && !Regex.IsMatch(node.Current.Name ?? "", @"^(?:Thought\b|Thinking\b|Reasoning\b|思考|已思考)", RegexOptions.IgnoreCase) && Inside(node, parent) && (toggle.Current.ControlType != ControlType.Button || !Inside(node, toggle)))) continue;
+                    result.Add(string.Join("-", parent.GetRuntimeId())); break;
+                }
+            }
+            return result;
         }
 
         private static Action PasteText(string text)
@@ -537,6 +606,7 @@ namespace ClaudeOfflineTranslator
         }
 
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
         [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
         [StructLayout(LayoutKind.Sequential)] private struct NativeInput { public uint Type; public InputUnion Union; }
@@ -544,6 +614,117 @@ namespace ClaudeOfflineTranslator
         [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }
         [StructLayout(LayoutKind.Sequential)] private struct KeyboardInput { public ushort VirtualKey, Scan; public uint Flags, Time; public IntPtr Extra; }
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, NativeInput[] inputs, int size);
+    }
+
+    public sealed class OutputBlock
+    {
+        public string Key, Message, Kind, Text;
+        public int Number;
+        public bool Streaming;
+    }
+
+    public sealed class OutputWork
+    {
+        public OutputBlock Block;
+        public long Epoch;
+    }
+
+    internal sealed class OutputLedger
+    {
+        private sealed class Entry
+        {
+            public OutputBlock Block;
+            public string Translation, Error;
+            public long StableSince;
+            public bool Pending;
+        }
+        private readonly Dictionary<string, Entry> entries = new Dictionary<string, Entry>();
+        private List<string> order = new List<string>();
+        private HashSet<string> messages = new HashSet<string>();
+        private long epoch, retryAfter;
+        public static string Label(string kind) { return kind == "notice" ? "思考状态" : kind == "thinking" ? "思考（界面公开内容）" : kind == "intermediate" ? "中间输出" : "回答"; }
+        public void Reset() { epoch++; entries.Clear(); order.Clear(); messages.Clear(); retryAfter = 0; }
+        public void Retry() { retryAfter = 0; foreach (var entry in entries.Values) entry.Error = null; }
+        public void Observe(List<OutputBlock> blocks, long now)
+        {
+            var currentMessages = new HashSet<string>(blocks.Select(block => block.Message));
+            if (messages.Count > 0 && !messages.Overlaps(currentMessages)) Reset();
+            messages = currentMessages;
+            order = blocks.Select(block => block.Key).Distinct().ToList();
+            foreach (var block in blocks)
+            {
+                Entry entry;
+                if (!entries.TryGetValue(block.Key, out entry)) { entry = new Entry { StableSince = now }; entries.Add(block.Key, entry); }
+                if (entry.Block == null || entry.Block.Text != block.Text) { entry.StableSince = now; entry.Translation = null; entry.Error = null; }
+                if (block.Streaming) entry.StableSince = now;
+                entry.Block = block;
+            }
+        }
+        public OutputWork Next(long now)
+        {
+            if (now < retryAfter) return null;
+            foreach (var key in order)
+            {
+                var entry = entries[key];
+                if (entry.Block.Kind == "notice" || entry.Pending || entry.Translation != null || string.IsNullOrWhiteSpace(entry.Block.Text) || entry.Block.Streaming || now - entry.StableSince < 1500) continue;
+                entry.Pending = true; return new OutputWork { Block = entry.Block, Epoch = epoch };
+            }
+            return null;
+        }
+        public bool Complete(OutputWork work, string translated)
+        {
+            Entry entry;
+            if (epoch != work.Epoch || !entries.TryGetValue(work.Block.Key, out entry)) return false;
+            entry.Pending = false;
+            if (entry.Block.Text != work.Block.Text || !order.Contains(work.Block.Key)) return false;
+            entry.Translation = translated; entry.Error = null; return true;
+        }
+        public void Fail(OutputWork work, long now, string error)
+        {
+            Entry entry;
+            if (epoch != work.Epoch || !entries.TryGetValue(work.Block.Key, out entry)) return;
+            entry.Pending = false; entry.Error = error; retryAfter = now + 30000;
+        }
+        public string Render()
+        {
+            if (order.Count == 0) return "暂无可读取输出。请在 Claude 中展开思考后点刷新；未公开的内部思考无法读取。";
+            var text = new StringBuilder();
+            foreach (var key in order)
+            {
+                var entry = entries[key];
+                text.Append("消息 ").Append(entry.Block.Number).Append(" · ").Append(Label(entry.Block.Kind)).AppendLine();
+                text.AppendLine(entry.Block.Kind == "notice" ? entry.Block.Text : entry.Translation ?? (entry.Error == null ? "等待内容稳定并翻译…" : "翻译失败：" + entry.Error));
+                text.AppendLine();
+            }
+            return text.ToString();
+        }
+    }
+
+    internal sealed class ResponseText
+    {
+        private readonly StringBuilder text = new StringBuilder(), code = new StringBuilder();
+        private void FlushCode()
+        {
+            if (code.Length == 0) return;
+            var value = code.ToString();
+            text.Append(value.Contains("\n") || value.Length > 100 ? "\n```\n" + value + "\n```\n" : "`" + value + "`"); code.Clear();
+        }
+        public void Add(string value, bool monospace) { if (monospace) code.Append(value); else { FlushCode(); text.Append(value); } }
+        public override string ToString() { FlushCode(); return text.ToString(); }
+    }
+
+    internal static class SubmissionGuard
+    {
+        public static void EnglishOnly(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 60000) throw new InvalidOperationException("英文为空或过长，未提交。");
+            for (int i = 0; i < text.Length; i++)
+            {
+                int point = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? char.ConvertToUtf32(text[i], text[++i]) : text[i];
+                if (point >= 0x2e80 && point <= 0x2fff || point == 0x3005 || point == 0x3007 || point >= 0x3038 && point <= 0x303b || point >= 0x3400 && point <= 0x4dbf || point >= 0x4e00 && point <= 0x9fff || point >= 0xf900 && point <= 0xfaff || point >= 0x20000 && point <= 0x3ffff)
+                    throw new InvalidOperationException("提交中仍含中文字符（包括代码或路径），已停止发送。");
+            }
+        }
     }
 
     // Chromium's document range omits empty paragraph nodes. Reconstruct the

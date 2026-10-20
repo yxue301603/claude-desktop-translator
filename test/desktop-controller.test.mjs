@@ -2,12 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { mode, operation } from '../src/desktop-controller.mjs';
+import { mode, operation, configurationMode } from '../src/desktop-controller.mjs';
 import { companionCommand } from '../src/powershell-command.mjs';
 
 test('only explicit account and offline modes are accepted', () => {
-  assert.equal(mode(), 'account'); assert.equal(mode('offline'), 'offline');
+  assert.equal(mode(), 'api'); assert.equal(mode('offline'), 'offline');
   assert.throws(() => mode('https://example.com'), /mode/);
+});
+
+test('upgrade migrates legacy auto-Chinese defaults to API, retains offline and requires explicit opt-in for legacy', () => {
+  assert.equal(configurationMode({ mode: 'account' }), 'api');
+  assert.equal(configurationMode({ mode: 'offline' }), 'offline');
+  assert.equal(configurationMode({ mode: 'account' }, 'account'), 'account');
+  assert.equal(configurationMode({ schemaVersion: 2, mode: 'account' }), 'account');
 });
 
 test('companion command preserves spaces and treats apostrophes as literal path characters', () => {

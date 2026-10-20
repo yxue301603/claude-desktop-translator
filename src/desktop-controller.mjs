@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { exists, readJson, writeJson } from './config.mjs';
 import { runService } from './service-runtime.mjs';
 import { companionCommand, spawnPowerShell } from './powershell-command.mjs';
+import { apiConfigurationId } from './api-translator.mjs';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
@@ -16,15 +17,19 @@ export const settingsPath = path.join(stateDirectory, 'offline.json');
 export const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const ownedServices = new Map();
 
-export function mode(value = 'account') {
-  if (!['account', 'offline'].includes(value)) throw new Error('Translation mode must be account or offline.');
+export function mode(value = 'api') {
+  if (!['api', 'account', 'offline'].includes(value)) throw new Error('Translation mode must be api, account or offline.');
   return value;
+}
+export function configurationMode(config, explicit) {
+  const saved = config.schemaVersion === 2 ? config.mode : config.mode === 'offline' ? 'offline' : 'api';
+  return mode(explicit || saved || 'api');
 }
 
 export async function settings(selectedMode) {
   let config = await exists(settingsPath) ? await readJson(settingsPath) : { port: 19877, token: randomBytes(32).toString('hex') };
   if (!Number.isInteger(config.port) || config.port < 1024 || config.port > 65535 || !/^[a-f0-9]{64}$/.test(config.token || '')) throw new Error('Invalid local translator settings');
-  config = { ...config, mode: mode(selectedMode || config.mode || 'account') };
+  config = { ...config, schemaVersion: 2, mode: configurationMode(config, selectedMode) };
   await writeJson(settingsPath, config);
   return config;
 }
@@ -50,7 +55,7 @@ export function operation(config, route, method = 'GET', body) {
 export async function startService(config, { inline = false } = {}) {
   let existing;
   try { existing = await operation(config, '/status'); } catch { /* service is not running */ }
-  if (existing?.version === version && existing.mode === config.mode) return { started: false };
+  if (existing?.version === version && existing.mode === config.mode && (config.mode !== 'api' || existing.apiConfigurationId === apiConfigurationId())) return { started: false };
   if (existing?.service === 'claude-offline-translator') {
     if (existing.active) throw new Error('Translation is still active. Wait for it to finish before changing mode.');
     await operation(config, '/shutdown', 'POST'); await delay(300);

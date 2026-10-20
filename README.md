@@ -1,99 +1,84 @@
-# Claude Desktop Translator · 插件版
+# Claude Desktop Translator · 1.0
 
-为 Windows Claude Desktop 提供中英双语工作流，发布格式为 **`.mcpb` 桌面扩展**。安装后由 Claude 启动翻译伴随窗口，继续使用自己的官方账号，无需第三方 Gateway 或翻译 API。
+Windows Claude Desktop 的 `.mcpb` 翻译扩展：**先在 Claude 对话之外译成英文，再提交；按消息翻译可读取的回答、思考摘要和中间输出。** 主对话继续使用自己的 Claude 官方账号。
 
-**默认账号双语模式不需要 Ollama 或本地模型。** 它将英文流程指令和中文原文一起提交给 Claude，由 Claude 依次生成英文理解、英文回答和完整中文译文，再将中文显示在伴随窗口。它不会假称“发送前已经将中文全部翻成英文”。
+默认使用用户提供 API Key 的翻译服务，无需本地模型。保留本地离线翻译，以及需明确开启的旧账号双语模式。英文输入不能保证避免封号；本项目不提供账号封禁规避承诺。
 
-如果必须先在本机翻译、只向 Claude 提交英文，可选择保留的 `offline` 模式。
+## 安装与配置
 
-## 安装插件
+1. 在 [Releases](https://github.com/yxue301603/claude-desktop-translator/releases/tag/v1.0.0) 下载 `claude-desktop-translator-1.0.0.mcpb`。
+2. Claude → Settings → Extensions → Advanced settings → Install Extension，选择安装包。
+3. 在扩展设置填写**翻译 API Key**、API 基础地址和模型。Key 标为敏感字段，只用于所选翻译服务，不是 Claude 桌面登录令牌。
+4. 默认地址为 `https://api.deepseek.com`，模型为 `deepseek-flash`。可改用兼容 Chat Completions 的 HTTPS 服务，如 `https://服务商/v1`；使用服务商自己的 Key 和模型名称。[DeepSeek 官方协议](https://api-docs.deepseek.com/)
+5. 默认保持“使用本地离线翻译”“允许发送中文：使用旧账号双语模式”关闭。启用后出现 `Claude 中英翻译 · API 英文提交 · v1.0.0`。
+6. 在伴随窗口输入中文，Enter 翻译并发送，Shift+Enter 换行。实际英文在预览区显示。
 
-1. 从 [Releases](https://github.com/yxue301603/claude-desktop-translator/releases) 下载 `claude-desktop-translator-0.4.0.mcpb`。
-2. 在 Claude Desktop → Settings → Extensions → Advanced settings → Install Extension 中选择该文件，或双击安装包。
-3. 保持两个可选开关均为**关闭**，即为默认的 `account` 模式，并自动打开翻译窗口。
-4. 在标题为 `Claude 中英翻译 · 账号双语 · v0.4.0` 的窗口输入中文。**Enter** 发送，**Shift+Enter** 换行。
-5. Claude 完成双语回答后，伴随窗口显示完整中文。实际提交内容可在预览区核对。
+不需要另装 Node.js；扩展使用 Claude Desktop 内置运行时和 Windows PowerShell 5.1。API Key 的额度、计费和数据处理由所选服务商决定。
 
-账号模式无需额外安装 Node.js 或 Ollama；扩展使用 Claude Desktop 内置的 Node.js，以及 Windows PowerShell 5.1 / .NET Framework。账号权限和组织策略仍由 Claude 决定。插件保留独立伴随窗口，通过 Windows 辅助功能读取与填写，不修改 Claude 的原始界面。
+## 默认不会把原始中文提交给 Claude
 
-详细说明、启停行为和两种模式的差异见 [插件使用说明](docs/plugin-guide.md)。
+API / offline 模式都调用英文准备接口，再进行两层中文字符检查和输入框逐字校验。翻译失败、缺少 Key、输出截断、保护内容或数值被改写时停止发送，保留原文；**不会回退到把中文交给 Claude 翻译**。
 
-## 两种模式
+代码、命令、URL 和路径原样保护。如果这些内容本来含有中文，也会拦截，不会为了通过检查偷偷改写代码或文件名。已有英文无需翻译，可直接准备提交。
 
-| 模式 | 发给 Claude 的内容 | 中文结果 | 额外要求 |
+此约束针对伴随窗口及本扩展提供的英文准备工具。用户直接在 Claude 原生输入框、附件或其他插件中输入的内容，本扩展无法全局拦截。默认 MCP 工具不返回中文译文给 Claude，中文输出只显示在伴随窗口。
+
+## 逐条输出与思考
+
+伴随窗口按“消息 → 思考 / 中间输出 / 回答”显示译文。读取辅助功能暴露的助手消息，不再只处理最后一条最终回答。各区块独立等待稳定、去重、翻译和重试；回答仍在生成时，已经稳定的公开思考可以先翻译。正文增长后重新翻译完整区块，切换聊天后丢弃过期结果。
+
+**仅处理 Claude 已显示并通过辅助功能暴露的文本。** 请自行展开思考区域，再点击伴随窗口“刷新”；插件不自动展开、不点击工具、不滚动你的聊天、不解锁屏幕。折叠且未暴露的内容、服务端内部思考、图像和未加载的历史文本无法读取或还原。公开的思考摘要与模型完整内部思考并不等同。
+
+API 模式会把这些待译文本发送给你配置的服务商，按区块产生翻译请求和费用；成功结果会缓存，失败后暂停 30 秒，可点刷新立即重试。暂停自动翻译可以关闭窗口内的勾选项。
+
+## 三种模式
+
+| 模式 | 交给 Claude 的输入 | 输出中译 | 要求 |
 |---|---|---|---|
-| `account`（默认） | 英文流程指令 + 中文原文 | 当前 Claude 官方账号生成 | 无本地模型；使用现有聊天额度 |
-| `offline` | 本地模型预翻译得到的英文 | 本地模型回译 | Ollama、Hy-MT2 权重约 1.13 GB |
+| `api`（默认） | 校验后的英文，拒绝中文残留 | 翻译 API；含可读取思考和中间文本 | 用户自己的翻译 API Key |
+| `offline` | 本地预翻译并校验的英文 | 本地模型；相同区块读取逻辑 | Ollama、Hy-MT2 约 1.13 GB |
+| `account`（旧模式，明确选择） | **含中文原文**的双语工作流 | 只提取带标记回答中的中文，不能独立回译思考 | 当前 Claude 账号 |
 
-账号模式只提取本工具发起的带分隔标记的回答；普通历史英文回答需要离线模式才能回译。它检查三段内容和结束标记是否完整，不把首句摘要当成全文。完整性检查不能保证所有语义都正确，Claude 原始双语回答可供核对。
+离线和旧账号双语模式不能同时开启。从 0.4 升级时，旧版默认 account 配置迁移为 api；不会自动继续发送中文。没有 API Key 时停止中文预翻译，或自行选择离线模式。
 
-## 从源码运行
+## 源码运行和离线模型
 
 ```powershell
 npm ci
+$env:CDT_TRANSLATION_API_KEY = '你的翻译服务 Key'
+$env:CDT_TRANSLATION_BASE_URL = 'https://api.deepseek.com'
+$env:CDT_TRANSLATION_MODEL = 'deepseek-flash'
 npm start
 ```
 
-也可双击 `启动翻译.cmd`。启动器默认使用已保存模式；旧配置没有模式时，默认改用账号双语模式。若 Claude 未暴露辅助功能输入框，请使用启动器打开 Claude，它会附带 `--force-renderer-accessibility`。
-
-显式选择模式：
+不要提交真实 Key 到仓库，也不要把 Key 写进命令截图。环境变量只在当前进程及其服务中使用；伴随窗口子进程不会继承翻译 Key。
 
 ```powershell
-node bin/offline.mjs launch account
+# 离线模式：先安装 Ollama，再下载一次模型
+npm run models
 node bin/offline.mjs launch offline
+
+# 显式模式选择
+node bin/offline.mjs launch api
+node bin/offline.mjs launch account
 npm run status
 npm run stop
 ```
 
-## 离线模式的额外安装
+API Key 不写入本扩展的 `offline.json`，只通过 Claude 的敏感配置环境变量进入翻译服务。已有模型不删除。离线质量历史记录见 [翻译质量报告](docs/translation-quality.md)。
 
-安装 [Ollama](https://ollama.com/download/windows)，再运行：
-
-```powershell
-npm run models
-node bin/offline.mjs launch offline
-```
-
-模型为腾讯 `Hy-MT2-1.8B-GGUF:Q4_K_M`，通过 `127.0.0.1:11434` 推理。首次下载与翻译推理分开，运行时不下载权重、不使用云端模型。也支持导入官方 GGUF 文件，安装脚本校验 SHA-256：
-
-```powershell
-node scripts/download-models.mjs --gguf C:\Models\Hy-MT2-1.8B-Q4_K_M.gguf
-```
-
-离线翻译保护代码、路径和 URL，在完整段落内翻译；长文按完整句子或段落分批并提供上一批上下文。模型遗漏、重复、换序占位符或输出截断时拒绝部分结果。真实样例及限制见 [离线翻译质量报告](docs/translation-quality.md)。
-
-## 数据和桌面权限
-
-主对话由 Claude 官方桌面程序使用当前登录账号发送。本扩展不读取登录凭据、不复用 OAuth 令牌、不代理主模型请求，不使用第三方翻译服务。
-
-伴随窗口连接仅监听 `127.0.0.1:19877` 的本地服务，使用随机本机令牌并拒绝网页 Origin。账号模式的请求准备与中文提取只处理字符串，不发出模型请求。离线模式只向本机 Ollama 发送推理请求。配置保存在 `~/.claude-desktop-translator/offline.json`；正常日志不保存原文、回答或译文。
-
-发送只在你点击按钮或在伴随窗口按 Enter 后发生，没有全局键鼠监听。为保留多行与代码，会临时使用剪贴板粘贴并在内容校验后恢复；若你在此期间进行了新的复制，则保留新复制内容。系统剪贴板历史与同步仍按系统设置工作。输入框已有其他草稿时会停止发送，防止覆盖；锁屏时不绕过焦点校验。
-
-未发送输入会用当前 Windows 用户的 DPAPI 加密保存，扩展停用或窗口意外退出后可恢复；发送成功或清空输入后删除。这是本机草稿恢复文件，不会打入安装包或上传 GitHub。
-
-## 构建与测试
+## 测试和构建
 
 ```powershell
 npm ci
 npm test
+powershell -NoProfile -STA -ExecutionPolicy Bypass -File test/windows/test-bridge.ps1
 npm run build:extension
 npm run verify:extension
-powershell -NoProfile -STA -ExecutionPolicy Bypass -File test/windows/test-bridge.ps1
 ```
 
-构建输出 `artifacts/*.mcpb` 与 `SHA256SUMS.txt`，仅包含白名单源码和生产依赖。包内协议测试从独立解压目录启动真实 MCP stdio 进程，检查工具、提示模板、配置隔离和私有文件排除。Windows 测试另覆盖正文提取、首句摘要排除、生成等待、正文增长及重试。
+Windows 测试使用不激活、位于屏幕外的辅助功能样例窗口，不向真实 Claude 发送消息。包内测试使用独立配置和真实 MCP stdio。安装包仅包含白名单源码及生产依赖，没有 API Key、草稿、模型或本机日志。
 
-可选离线模型测试：`npm run doctor`、`npm run accuracy`。准确性脚本生成真实译文供逐项核对，不把脚本运行成功当成语义准确率 100%。
+[1.0 验收记录与范围](docs/verification-1.0.md) · [使用说明](docs/plugin-guide.md) · [数据处理说明](docs/privacy.md) · [历史验收](docs/verification.md)
 
-交付与实机范围见 [验收记录](docs/verification.md)，安装与明早验收步骤见 [插件使用说明](docs/plugin-guide.md)。
-
-## 升级
-
-从 0.3.x 升级：关闭旧伴随窗口，更新源码或安装新的 `.mcpb`，默认选择 `account` 即可绕开 Ollama 启动和模型下载。已有模型不删除，可以随时选回 `offline`。
-
-若曾使用 0.1.0 的 Code Gateway 插件，请先禁用卸载旧插件，再使用新版本。旧实现仅保留在 Git 历史中；当前扩展无 Gateway 逻辑。
-
-[模型来源](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF) · [MCPB 官方规范](https://github.com/modelcontextprotocol/mcpb) · [Claude 扩展安装说明](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
-
-MIT License。本项目与 Anthropic 无隶属关系，模型权重不随源码或扩展分发。
+MIT License。本项目与 Anthropic 无隶属关系。

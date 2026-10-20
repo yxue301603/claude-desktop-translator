@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 try {
-  const config = await settings(process.env.CDT_TRANSLATION_MODE || (process.env.CDT_OFFLINE_MODE === 'true' ? 'offline' : 'account'));
+  if (process.env.CDT_OFFLINE_MODE === 'true' && process.env.CDT_LEGACY_ACCOUNT_MODE === 'true') throw new Error('离线模式与旧账号双语模式不能同时启用。');
+  const config = await settings(process.env.CDT_TRANSLATION_MODE || (process.env.CDT_OFFLINE_MODE === 'true' ? 'offline' : process.env.CDT_LEGACY_ACCOUNT_MODE === 'true' ? 'account' : 'api'));
   const ownerLease = path.join(stateDirectory, `extension-owner-${randomUUID()}.pid`);
   await writeFile(ownerLease, String(process.pid), { mode: 0o600 });
   const report = message => { process.stderr.write(`Translator startup: ${message}\n`); appendFile(path.join(stateDirectory, 'extension-startup.log'), `${new Date().toISOString()} ${message}\n`).catch(() => {}); };

@@ -20,13 +20,17 @@ for (const excluded of ['.local', '.git', 'offline.json', 'node_modules/@anthrop
   await assert.rejects(access(path.join(output, excluded)), undefined, excluded + ' must not be bundled');
 const client = new Client({ name: 'packaged-extension-verification', version: '1' });
 const profile = await mkdtemp(path.join(root, 'artifacts/mcpb-profile-'));
-const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(output, 'bin/extension.mjs')], cwd: output, env: { ...process.env, CDT_STATE_DIRECTORY: profile, CDT_AUTO_START: 'false', CDT_TRANSLATION_MODE: 'account' }, stderr: 'pipe' });
+const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(output, 'bin/extension.mjs')], cwd: output, env: { ...process.env, CDT_STATE_DIRECTORY: profile, CDT_AUTO_START: 'false', CDT_TRANSLATION_MODE: 'api', CDT_TRANSLATION_API_KEY: '' }, stderr: 'pipe' });
 try {
   await client.connect(transport);
-  const tools = await client.listTools(); assert.equal(tools.tools.length, 5);
-  const prompt = await client.getPrompt({ name: 'bilingual_request', arguments: { text: '请保留 `npm test`，完整回答，不要执行。' } });
-  assert.ok(prompt.messages[0].content.text.includes('请保留 `npm test`'));
+  const tools = await client.listTools(); assert.equal(tools.tools.length, 3);
+  assert.ok(!tools.tools.some(tool => /bilingual/.test(tool.name)));
+  const prompts = await client.listPrompts(); assert.equal(prompts.prompts[0].name, 'english_request');
   const result = await client.callTool({ name: 'translator_status', arguments: {} });
   assert.equal(result.structuredContent.localModelRequired, false);
-  console.log(JSON.stringify({ archive, bytes: bytes.length, sha256: digest, packagedStdio: true, toolCount: tools.tools.length, noLocalModelRequired: true, noPrivateFilesOrDevTools: true }, null, 2));
+  assert.equal(result.structuredContent.englishOnly, true);
+  const prepared = await client.callTool({ name: 'prepare_english_request', arguments: { text: 'Explain this code without executing it.' } });
+  assert.equal(prepared.structuredContent.text, 'Explain this code without executing it.');
+  const rejected = await client.callTool({ name: 'prepare_english_request', arguments: { text: '你好' } }); assert.equal(rejected.isError, true);
+  console.log(JSON.stringify({ archive, bytes: bytes.length, sha256: digest, packagedStdio: true, toolCount: tools.tools.length, englishOnly: true, rejectsMissingKeyWithoutSourceFallback: true, noLocalModelRequired: true, noPrivateFilesOrDevTools: true }, null, 2));
 } finally { await client.close(); }

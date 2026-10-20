@@ -2,34 +2,99 @@
   "manifest_version": "0.3",
   "name": "claude-desktop-translator",
   "display_name": "Claude 中英翻译",
-  "version": "0.4.0",
-  "description": "Claude 桌面中英双语扩展：账号双语模式无需本地模型，另可选离线预翻译。",
-  "long_description": "安装并启用后自动打开 Windows 翻译伴随窗口。account 模式由当前 Claude 账号生成英文理解、英文回答和完整中文译文，不需要 Ollama，实际提交会包含中文原文。offline 模式在本机先译成英文再发送，需要已安装的 Hy-MT2 离线模型。本扩展保留伴随窗口，不修改 Claude 界面或登录凭据。",
-  "author": { "name": "yxue301603", "url": "https://github.com/yxue301603" },
-  "repository": { "type": "git", "url": "https://github.com/yxue301603/claude-desktop-translator" },
+  "version": "1.0.0",
+  "description": "英文提交与完整输出中译：支持翻译 API Key、本地模型和可选旧双语模式。",
+  "long_description": "默认使用用户配置的兼容 Chat Completions 翻译 API，先译成英文并拒绝残留中文后才提交给 Claude。按消息翻译辅助功能可读取的回答、思考摘要和中间文本。没有暴露的内部思考无法读取。另可选离线模式，或明确允许发送中文的旧账号双语模式。不能保证避免账号封禁。",
+  "author": {
+    "name": "yxue301603",
+    "url": "https://github.com/yxue301603"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yxue301603/claude-desktop-translator"
+  },
   "homepage": "https://github.com/yxue301603/claude-desktop-translator",
   "license": "MIT",
-  "privacy_policies": ["https://github.com/yxue301603/claude-desktop-translator/blob/main/docs/privacy.md"],
+  "privacy_policies": [
+    "https://github.com/yxue301603/claude-desktop-translator/blob/main/docs/privacy.md"
+  ],
   "server": {
     "type": "node",
     "entry_point": "bin/extension.mjs",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/bin/extension.mjs"],
-      "env": { "CDT_OFFLINE_MODE": "${user_config.offline_mode}", "CDT_MANUAL_START": "${user_config.manual_start}" }
+      "args": [
+        "${__dirname}/bin/extension.mjs"
+      ],
+      "env": {
+        "CDT_OFFLINE_MODE": "${user_config.offline_mode}",
+        "CDT_LEGACY_ACCOUNT_MODE": "${user_config.legacy_account_mode}",
+        "CDT_MANUAL_START": "${user_config.manual_start}",
+        "CDT_TRANSLATION_API_KEY": "${user_config.translation_api_key}",
+        "CDT_TRANSLATION_BASE_URL": "${user_config.translation_base_url}",
+        "CDT_TRANSLATION_MODEL": "${user_config.translation_model}"
+      }
     }
   },
-  "compatibility": { "platforms": ["win32"], "runtimes": { "node": ">=22" } },
+  "compatibility": {
+    "platforms": [
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=22"
+    }
+  },
   "tools": [
-    { "name": "translator_status", "description": "查看翻译模式和运行状态" },
-    { "name": "open_translation_window", "description": "打开翻译伴随窗口，不发送聊天消息" },
-    { "name": "prepare_bilingual_request", "description": "生成交给当前 Claude 账号处理的双语请求" },
-    { "name": "extract_bilingual_response", "description": "从完整双语回答中提取中文" },
-    { "name": "translate_text_offline", "description": "使用已安装的本地模型翻译，仅限 offline 模式" }
+    {
+      "name": "translator_status",
+      "description": "查看翻译模式和运行状态"
+    },
+    {
+      "name": "open_translation_window",
+      "description": "打开翻译伴随窗口，不发送聊天消息"
+    }
   ],
   "prompts_generated": true,
   "user_config": {
-    "offline_mode": { "type": "boolean", "title": "使用离线预翻译（需要 Ollama）", "description": "关闭：由当前 Claude 账号生成双语回答，提交含中文原文，无需本地模型。打开：本机先译成英文再发送，需要 Ollama。", "default": false },
-    "manual_start": { "type": "boolean", "title": "仅启用 MCP 工具，不自动打开窗口", "description": "默认关闭，启用扩展即打开翻译窗口，但不发送消息。打开此选项后，可手动调用 open_translation_window。", "default": false }
-  }
+    "translation_api_key": {
+      "type": "string",
+      "title": "翻译 API Key",
+      "description": "只用于翻译服务，不是 Claude 桌面登录令牌。未配置时停止中文预翻译；不会回退发送中文。",
+      "sensitive": true,
+      "required": false
+    },
+    "translation_base_url": {
+      "type": "string",
+      "title": "翻译 API 基础地址",
+      "description": "兼容 Chat Completions 的 HTTPS 地址；原文和待译输出将发送给此服务商。",
+      "default": "https://api.deepseek.com",
+      "required": false
+    },
+    "translation_model": {
+      "type": "string",
+      "title": "翻译模型",
+      "description": "填写所选服务商支持的模型名称。",
+      "default": "deepseek-flash",
+      "required": false
+    },
+    "offline_mode": {
+      "type": "boolean",
+      "title": "使用本地离线翻译",
+      "description": "需要 Ollama 与 Hy-MT2。先翻成英文，含中文的代码或路径会阻止提交。",
+      "default": false
+    },
+    "legacy_account_mode": {
+      "type": "boolean",
+      "title": "允许发送中文：使用旧账号双语模式",
+      "description": "明确选择此项才会把中文原文交给 Claude。该旧模式不能独立翻译思考或普通历史输出。不能与离线模式同时启用。",
+      "default": false
+    },
+    "manual_start": {
+      "type": "boolean",
+      "title": "仅启用 MCP 工具，不自动打开窗口",
+      "description": "默认关闭，启用扩展即打开翻译窗口，但不发送消息。打开此选项后，可手动调用 open_translation_window。",
+      "default": false
+    }
+  },
+  "tools_generated": true
 }

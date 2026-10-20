@@ -1,7 +1,7 @@
 {
   "name": "claude-desktop-translator",
-  "version": "0.4.0",
-  "description": "Claude Desktop MCPB extension with account bilingual and offline translation modes",
+  "version": "1.0.0",
+  "description": "Claude Desktop extension: English-only API/offline submission and translated output timeline",
   "type": "module",
   "private": true,
   "engines": {

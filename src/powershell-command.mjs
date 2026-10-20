@@ -14,5 +14,6 @@ export function companionCommand({ script, config, ownerPid = 0, ownerLease = ''
 export function spawnPowerShell(args) {
   const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
   // DETACHED_PROCESS exits successfully without running scripts on this host.
-  return spawn(executable, args, { detached: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const { CDT_TRANSLATION_API_KEY: unusedSecret, ...env } = process.env;
+  return spawn(executable, args, { env, detached: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 }
