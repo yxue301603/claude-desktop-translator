@@ -21,11 +21,11 @@ export function translationUnits(text, limit = maxUnitLength) {
   return units;
 }
 
-export function prepareTranslation(text) {
+export function prepareTranslation(text, options) {
   if (/^\s*[\[{]/.test(text)) {
     try { JSON.parse(text); return { literal: true, text }; } catch { /* prose */ }
   }
-  const protectedText = protectLiterals(text);
+  const protectedText = protectLiterals(text, options);
   const tokens = protectedText.literals.map(item => item.token);
   const prose = source => tokens.reduce((result, token) => result.replaceAll(token, ''), source);
   function validate(source, result) {

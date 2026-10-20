@@ -1,6 +1,6 @@
 {
   "name": "claude-desktop-translator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Claude Desktop extension: English-only API/offline submission and translated output timeline",
   "type": "module",
   "private": true,

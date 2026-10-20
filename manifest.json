@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "claude-desktop-translator",
   "display_name": "Claude 中英翻译",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "英文提交与完整输出中译：支持翻译 API Key、本地模型和可选旧双语模式。",
   "long_description": "默认使用用户配置的兼容 Chat Completions 翻译 API，先译成英文并拒绝残留中文后才提交给 Claude。按消息翻译辅助功能可读取的回答、思考摘要和中间文本。没有暴露的内部思考无法读取。另可选离线模式，或明确允许发送中文的旧账号双语模式。不能保证避免账号封禁。",
   "author": {

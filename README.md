@@ -6,11 +6,11 @@ Windows Claude Desktop 的 `.mcpb` 翻译扩展：**先在 Claude 对话之外�
 
 ## 安装与配置
 
-1. 在 [Releases](https://github.com/yxue301603/claude-desktop-translator/releases/tag/v1.0.0) 下载 `claude-desktop-translator-1.0.0.mcpb`。
+1. 在 [Releases](https://github.com/yxue301603/claude-desktop-translator/releases/tag/v1.0.1) 下载 `claude-desktop-translator-1.0.1.mcpb`。
 2. Claude → Settings → Extensions → Advanced settings → Install Extension，选择安装包。
 3. 在扩展设置填写**翻译 API Key**、API 基础地址和模型。Key 标为敏感字段，只用于所选翻译服务，不是 Claude 桌面登录令牌。
 4. 默认地址为 `https://api.deepseek.com`，模型为 `deepseek-flash`。可改用兼容 Chat Completions 的 HTTPS 服务，如 `https://服务商/v1`；使用服务商自己的 Key 和模型名称。[DeepSeek 官方协议](https://api-docs.deepseek.com/)
-5. 默认保持“使用本地离线翻译”“允许发送中文：使用旧账号双语模式”关闭。启用后出现 `Claude 中英翻译 · API 英文提交 · v1.0.0`。
+5. 默认保持“使用本地离线翻译”“允许发送中文：使用旧账号双语模式”关闭。启用后出现 `Claude 中英翻译 · API 英文提交 · v1.0.1`。
 6. 在伴随窗口输入中文，Enter 翻译并发送，Shift+Enter 换行。实际英文在预览区显示。
 
 不需要另装 Node.js；扩展使用 Claude Desktop 内置运行时和 Windows PowerShell 5.1。API Key 的额度、计费和数据处理由所选服务商决定。

@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-20",
+  "provider": "DeepSeek official API",
+  "model": "deepseek-flash",
+  "authenticationPassed": true,
+  "isolatedTranslationRequests": 3,
+  "isolatedTokenUsage": 641,
+  "cacheAvoidedDuplicateBilling": true,
+  "chineseLiteralGuardPassed": true,
+  "cases": [
+    {
+      "id": "chinese-to-english",
+      "source": "只有在测试通过且耗时不超过 250 毫秒时才能继续。不要执行代码、删除文件或上传数据。解释下面的 JavaScript 并原样返回代码，不要使用工具。\n```js\nconst message = \"hello\";\nconsole.log(message);\n```",
+      "translated": "Continue only if the tests pass and the time taken does not exceed 250 milliseconds. Do not execute code, delete files, or upload data. Explain the following JavaScript and return the code as-is, without using tools.\n```js\nconst message = \"hello\";\nconsole.log(message);\n```",
+      "automatedChecksPassed": true
+    },
+    {
+      "id": "public-thinking-sample",
+      "source": "I should first check both conditions: the tests must pass, and elapsed time must not exceed 250 ms. I must not run the code, delete files, or upload data. Then I can explain the example without changing its literals.",
+      "translated": "我应该先检查两个条件：测试必须通过，并且经过的时间不得超过250毫秒。我不得运行代码、删除文件或上传数据。然后我可以在不改变其字面量的情况下解释这个示例。",
+      "automatedChecksPassed": true,
+      "syntheticSampleNotActualClaudeThinking": true
+    },
+    {
+      "id": "complete-answer",
+      "source": "This JavaScript stores the string \"hello\" in a constant named message and logs it to the console.\n\n```js\nconst message = \"hello\";\nconsole.log(message);\n```\n\nProceed only if tests pass and elapsed time is at most 250 ms. Do not execute code, delete files, or upload data.\n\nWould you like an explanation of each line?",
+      "translated": "这段 JavaScript 将字符串“hello”存储在一个名为 message 的常量中，并将其输出到控制台。\n\n```js\nconst message = \"hello\";\nconsole.log(message);\n```\n\n仅在测试通过且经过时间不超过 250 毫秒时才继续。不要执行代码、删除文件或上传数据。\n\n您需要逐行解释吗？",
+      "automatedChecksPassed": true
+    }
+  ],
+  "scope": "These API samples used production loopback routes. The thinking sample is synthetic; actual desktop verification is recorded separately. No API key is included."
+}

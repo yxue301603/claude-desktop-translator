@@ -96,16 +96,23 @@ try {
     if($window){break}
   }
   Assert ($null -ne $window) 'Fixture window not found'
+  $legacy=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'legacy assistant fixture')))
   $method=[ClaudeOfflineTranslator.DesktopBridge].GetMethod('ReadResponse',[Reflection.BindingFlags]'NonPublic,Static')
-  $text=$method.Invoke($null,@($window.psobject.BaseObject))
+  $text=$method.Invoke($null,@($legacy.psobject.BaseObject))
   Assert ($text -eq 'First sentence. Second sentence. Final question?') ('Full body capture failed: '+$text)
   $capture=[ClaudeOfflineTranslator.DesktopBridge].GetMethod('ReadOutputBlocks',[Reflection.BindingFlags]'NonPublic,Static')
-  $blocks=$capture.Invoke($null,@($window.psobject.BaseObject,'fixture-message',1,$false))
+  $blocks=$capture.Invoke($null,@($legacy.psobject.BaseObject,'fixture-message',1,$false))
   Assert (@($blocks | Where-Object Kind -EQ 'thinking').Count -eq 1) 'Expanded semantic thinking must be captured separately'
   Assert (($blocks | Where-Object Kind -EQ 'thinking').Text -eq 'I will compare the constraints before answering.') 'Full thinking text, no header duplication'
   Assert (($blocks | Where-Object Kind -EQ 'intermediate').Text -eq 'Tool finished without changing files.') 'Intermediate tool text must be captured'
   Assert (-not (($blocks | ForEach-Object Text) -join '').Contains('Collapsed text')) 'Collapsed unavailable thinking must never be invented'
   Assert (-not (($blocks | ForEach-Object Text) -join '').Contains('Promotion outside')) 'Non-output UI must not be translated'
+  $modern=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'modern assistant fixture')))
+  $modernText=$method.Invoke($null,@($modern.psobject.BaseObject))
+  Assert ($modernText -eq "Modern first sentence. Second sentence.`n- List conclusion with 250 ms.") ('Modern message-row body/list capture failed: '+$modernText)
+  Assert (-not $modernText.Contains('Claude Code is built')) 'Flattened Upgrade/Dismiss promotion must not enter the answer'
+  $user=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'modern user fixture')))
+  Assert ($method.Invoke($null,@($user.psobject.BaseObject)) -eq '') 'A user message must not be mistaken for an assistant by its row class'
   $summary=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
     (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text))) | Where-Object {$_.Current.Name -like 'Claude responded:*'} | Select-Object -First 1
   $text=$method.Invoke($null,@($summary.psobject.BaseObject))

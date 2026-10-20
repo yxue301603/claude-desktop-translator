@@ -384,7 +384,9 @@ namespace ClaudeOfflineTranslator
                             english.Text = translated.Replace("\r\n", "\n").Replace("\n", "\r\n");
                             SetForegroundWindow(current.Handle);
                             current.Input.SetFocus();
-                            if (GetForegroundWindow() != current.Handle || !Automation.Compare(AutomationElement.FocusedElement, current.Input)) throw new InvalidOperationException("Claude 输入框未获得焦点，未提交。请解锁屏幕并打开聊天窗口。");
+                            WaitForComposerFocus(current, desktopDraft, delegate
+                            {
+                            if (ownInput && source.Text != original) throw new InvalidOperationException("中文输入已改动，请重新发送。");
                             DebugStage("input_focus_ready");
                             restoreClipboard = PasteText(translated);
                             DebugStage("english_typed");
@@ -418,12 +420,36 @@ namespace ClaudeOfflineTranslator
                                 catch (Exception error) { timer.Stop(); timer.Dispose(); status.Text = error.Message; Interlocked.Exchange(ref sending, 0); RestoreClipboard(); }
                             };
                             timer.Start();
+                            });
                         }
                         catch (Exception error) { status.Text = error.Message; sending = 0; RestoreClipboard(); }
                     });
                 }
                 catch (Exception error) { Ui(delegate { status.Text = error.Message; sending = 0; }); }
             });
+        }
+
+        private void WaitForComposerFocus(Snapshot current, string expectedDraft, Action ready)
+        {
+            // SetFocus and foreground activation complete asynchronously in
+            // Chromium. Wait without blocking the UI, then enforce both guards.
+            var timer = new System.Windows.Forms.Timer { Interval = 100 };
+            int attempts = 0;
+            timer.Tick += delegate
+            {
+                try
+                {
+                    if (ReadContext(current.Window) != current.Context || ReadInput(current.Input) != expectedDraft) throw new InvalidOperationException("Claude 会话或草稿已改动，未提交。");
+                    if (GetForegroundWindow() != current.Handle || !Automation.Compare(AutomationElement.FocusedElement, current.Input))
+                    {
+                        if (++attempts < 20) return;
+                        throw new InvalidOperationException("Claude 输入框未获得焦点，未提交。请解锁屏幕并打开聊天窗口。");
+                    }
+                    timer.Stop(); timer.Dispose(); ready();
+                }
+                catch (Exception error) { timer.Stop(); timer.Dispose(); status.Text = error.Message; Interlocked.Exchange(ref sending, 0); RestoreClipboard(); }
+            };
+            timer.Start();
         }
 
         private void ShowOutputs()
@@ -468,18 +494,21 @@ namespace ClaudeOfflineTranslator
             var result = new List<OutputBlock>();
             var builders = new Dictionary<string, ResponseText>();
             var all = message.FindAll(TreeScope.Descendants, Condition.TrueCondition).Cast<AutomationElement>().ToArray();
+            bool assistant = all.Any(node => node.Current.ControlType == ControlType.Text && (node.Current.ClassName ?? "").Split(' ').Contains("sr-only") && (node.Current.Name ?? "").StartsWith("Claude responded:", StringComparison.Ordinal));
             var regions = ThinkingRegions(message, all);
+            var auxiliaryRegions = AuxiliaryRegions(message, all);
             // Chromium exposes raw-only containers whose FindAll(Descendants)
             // returns no children. Enumerate from the message, then classify each
             // text node by its raw ancestry instead of querying that container.
-            var nodes = all.Where(node => node.Current.ControlType == ControlType.Text);
+            var nodes = all.Where(node => node.Current.ControlType == ControlType.Text || (node.Current.ControlType == ControlType.ListItem || node.Current.ControlType == ControlType.DataItem || node.Current.ControlType == ControlType.HeaderItem) && !all.Any(childNode => childNode != node && (childNode.Current.ControlType == ControlType.Text || childNode.Current.ControlType == ControlType.ListItem || childNode.Current.ControlType == ControlType.DataItem || childNode.Current.ControlType == ControlType.HeaderItem) && Inside(childNode, node)));
             foreach (AutomationElement node in nodes)
             {
                 if ((node.Current.ClassName ?? "").Contains("sr-only")) continue;
                 var ancestor = TreeWalker.RawViewWalker.GetParent(node);
                 bool auxiliary = false;
                 bool codeBlock = false;
-                string kind = null, region = null;
+                string kind = null, region = null, paragraph = null;
+                var child = node;
                 for (int depth = 0; depth < 64 && ancestor != null && !Automation.Compare(ancestor, message); depth++)
                 {
                     var className = ancestor.Current.ClassName ?? "";
@@ -487,12 +516,14 @@ namespace ClaudeOfflineTranslator
                     object expansion;
                     if (ancestor.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out expansion) && ((ExpandCollapsePattern)expansion).Current.ExpandCollapseState == ExpandCollapseState.Collapsed) { auxiliary = true; break; }
                     var identity = string.Join("-", ancestor.GetRuntimeId());
+                    if (auxiliaryRegions.Contains(identity)) { auxiliary = true; break; }
                     var semantic = className + " " + ancestor.Current.AutomationId;
                     if (regions.Contains(identity) || Regex.IsMatch(semantic, @"(?:^|[-_ /])(?:thinking|reasoning|thoughts?)(?:$|[-_ /])", RegexOptions.IgnoreCase)) { kind = "thinking"; region = identity; }
                     else if (kind != "thinking" && Regex.IsMatch(semantic, @"tool[-_/](?:result|output|use)|intermediate|progress-message", RegexOptions.IgnoreCase)) { kind = "intermediate"; region = identity; }
                     else if (kind == null && className.Split(' ').Contains("font-claude-response")) { kind = "answer"; region = identity; }
+                    else if (kind == null && assistant && className.Split(' ').Contains("group/message-row")) { kind = "answer"; region = "message-body"; paragraph = string.Join("-", child.GetRuntimeId()); }
                     if ((ancestor.Current.Name ?? "").EndsWith(" code", StringComparison.Ordinal) && (ancestor.Current.ClassName ?? "").Contains("group/copy")) codeBlock = true;
-                    ancestor = TreeWalker.RawViewWalker.GetParent(ancestor);
+                    child = ancestor; ancestor = TreeWalker.RawViewWalker.GetParent(ancestor);
                 }
                 if (auxiliary || kind == null) continue;
                 object pattern;
@@ -505,6 +536,8 @@ namespace ClaudeOfflineTranslator
                     font = Convert.ToString(range.GetAttributeValue(TextPattern.FontNameAttribute));
                 }
                 if (string.IsNullOrEmpty(text)) continue;
+                if (node.Current.ControlType == ControlType.ListItem) { paragraph = string.Join("-", node.GetRuntimeId()); text = "- " + text; }
+                else if (node.Current.ControlType == ControlType.DataItem || node.Current.ControlType == ControlType.HeaderItem) paragraph = string.Join("-", node.GetRuntimeId());
                 bool monospace = Regex.IsMatch(font, "mono|consolas|courier", RegexOptions.IgnoreCase);
                 if (codeBlock && !monospace) continue;
                 var key = messageKey + "|" + kind + "|" + region;
@@ -514,7 +547,7 @@ namespace ClaudeOfflineTranslator
                     builder = new ResponseText(); builders.Add(key, builder);
                     result.Add(new OutputBlock { Key = key, Message = messageKey, Number = number, Kind = kind, Streaming = streaming && kind != "thinking" });
                 }
-                builder.Add(text, monospace);
+                builder.Add(text, monospace, paragraph);
             }
             foreach (var block in result) block.Text = builders[block.Key].ToString();
             if (!result.Any(block => block.Kind == "thinking") && all.Any(node => (node.Current.ControlType == ControlType.Button || node.Current.ControlType == ControlType.Group) && Regex.IsMatch(node.Current.Name ?? "", @"^(?:Thought\b|Thinking\b|Reasoning\b|Show thinking\b|思考|已思考)", RegexOptions.IgnoreCase)))
@@ -540,6 +573,36 @@ namespace ClaudeOfflineTranslator
                 {
                     if (!nodes.Any(node => node.Current.ControlType == ControlType.Text && !Regex.IsMatch(node.Current.Name ?? "", @"^(?:Thought\b|Thinking\b|Reasoning\b|思考|已思考)", RegexOptions.IgnoreCase) && Inside(node, parent) && (toggle.Current.ControlType != ControlType.Button || !Inside(node, toggle)))) continue;
                     result.Add(string.Join("-", parent.GetRuntimeId())); break;
+                }
+            }
+            return result;
+        }
+
+        private static HashSet<string> AuxiliaryRegions(AutomationElement message, AutomationElement[] nodes)
+        {
+            var result = new HashSet<string>();
+            var buttons = nodes.Where(node => node.Current.ControlType == ControlType.Button).ToArray();
+            foreach (var dismiss in buttons.Where(node => node.Current.Name == "Dismiss"))
+            {
+                var parent = TreeWalker.RawViewWalker.GetParent(dismiss);
+                for (int depth = 0; depth < 6 && parent != null && !Automation.Compare(parent, message); depth++, parent = TreeWalker.RawViewWalker.GetParent(parent))
+                {
+                    if ((parent.Current.ClassName ?? "").Split(' ').Contains("group/message-row")) break;
+                    if (!buttons.Any(button => button.Current.Name == "Upgrade" && Inside(button, parent))) continue;
+                    result.Add(string.Join("-", parent.GetRuntimeId())); break;
+                }
+            }
+            // Chromium can flatten a promotional card into sibling nodes. Only
+            // its known heading immediately before Upgrade + Dismiss is UI text.
+            if (buttons.Any(button => button.Current.Name == "Dismiss"))
+            {
+                foreach (var upgrade in buttons.Where(button => button.Current.Name == "Upgrade"))
+                {
+                    int position = Array.IndexOf(nodes, upgrade);
+                    var heading = nodes.Take(position).LastOrDefault(node => node.Current.ControlType == ControlType.Text);
+                    if (heading == null || !Regex.IsMatch(heading.Current.Name ?? "", @"^(?:Claude Code is built into this app|Try Claude Code|Meet Claude Code|Upgrade to Pro|Upgrade to Max)$")) continue;
+                    var parent = TreeWalker.RawViewWalker.GetParent(heading);
+                    if (parent != null && !Automation.Compare(parent, message) && !(parent.Current.ClassName ?? "").Split(' ').Contains("group/message-row")) result.Add(string.Join("-", parent.GetRuntimeId()));
                 }
             }
             return result;
@@ -703,13 +766,19 @@ namespace ClaudeOfflineTranslator
     internal sealed class ResponseText
     {
         private readonly StringBuilder text = new StringBuilder(), code = new StringBuilder();
+        private string paragraph;
         private void FlushCode()
         {
             if (code.Length == 0) return;
             var value = code.ToString();
             text.Append(value.Contains("\n") || value.Length > 100 ? "\n```\n" + value + "\n```\n" : "`" + value + "`"); code.Clear();
         }
-        public void Add(string value, bool monospace) { if (monospace) code.Append(value); else { FlushCode(); text.Append(value); } }
+        public void Add(string value, bool monospace, string block = null)
+        {
+            if (block != null && paragraph != null && block != paragraph) { FlushCode(); text.Append('\n'); }
+            if (block != null) paragraph = block;
+            if (monospace) code.Append(value); else { FlushCode(); text.Append(value); }
+        }
         public override string ToString() { FlushCode(); return text.ToString(); }
     }
 

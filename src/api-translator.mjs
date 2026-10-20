@@ -28,7 +28,7 @@ export class ApiTranslator {
     if (!['en', 'zh'].includes(target) || typeof text !== 'string' || text.length > 30000) throw new Error('Invalid translation text or direction');
     const cacheKey = createHash('sha256').update(target + '\0' + text).digest('hex');
     if (this.cache.has(cacheKey)) return this.cache.get(cacheKey);
-    const prepared = prepareTranslation(text);
+    const prepared = prepareTranslation(text, { numbers: true });
     if (prepared.literal) return text;
     let result = '', context = '';
     for (const unit of translationUnits(prepared.text, 6000)) {

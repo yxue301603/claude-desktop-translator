@@ -14,7 +14,7 @@ test('API request contract preserves code and numbers, translates whole context,
     calls.push({ url, request });
     const body = JSON.parse(request.body), source = JSON.parse(body.messages[1].content).text;
     const tokens = source.match(/__CDT_[a-f0-9]{12}_\d+__/g);
-    return reply(`Proceed only if the tests pass within 250 ms. Do not execute ${tokens[0]}.\n${tokens[1]}`);
+    return reply(`Proceed only if the tests pass within ${tokens[0]} ms. Do not execute ${tokens[1]}.\n${tokens[2]}`);
   } });
   const source = '只有测试通过且耗时不超过 250 毫秒才继续。不要执行 `npm test`。\n```js\nconst value = 3;\n```';
   const result = await prepareEnglishSubmission(engine, source);
@@ -41,7 +41,7 @@ test('API rejects truncated, altered literal/number, reasoning-only, invalid and
     await assert.rejects(engine.translate(source, 'en'), error => !error.message.includes('Echoed private content') && !error.message.includes(config.key));
   }
   const altered = new ApiTranslator({ config, fetchImpl: async () => reply('Continue within 25 ms.') });
-  await assert.rejects(altered.translate('在 250 毫秒内继续。', 'en'), /数值/);
+  await assert.rejects(altered.translate('在 250 毫秒内继续。', 'en'), /数值|protected literal/);
   const failure = new ApiTranslator({ config, fetchImpl: async () => { throw Error('private transport diagnostic'); } });
   await assert.rejects(failure.translate('你好', 'en'), error => !error.message.includes('private transport'));
   let attempts = 0;

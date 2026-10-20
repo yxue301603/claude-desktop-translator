@@ -4,7 +4,7 @@
 
 在 Claude 扩展设置中填入翻译服务的 API Key、基础地址和模型。默认使用 DeepSeek 官方 `https://api.deepseek.com` 与 `deepseek-flash`；也支持其他兼容 `/chat/completions` 的 HTTPS 地址。Key 用于翻译，不是 Claude 登录令牌，也不会改变主对话登录方式。协议见 [DeepSeek 官方文档](https://api-docs.deepseek.com/api/create-chat-completion/)。
 
-安装 `claude-desktop-translator-1.0.0.mcpb` 后，关闭“使用本地离线翻译”和“允许发送中文：使用旧账号双语模式”，重新启用扩展。在 `API 英文提交 · v1.0.0` 窗口输入中文，Enter 发送；Shift+Enter 换行。窗口关闭后可重新启用扩展，或调用 `open_translation_window` 重新打开。
+安装 `claude-desktop-translator-1.0.1.mcpb` 后，关闭“使用本地离线翻译”和“允许发送中文：使用旧账号双语模式”，重新启用扩展。在 `API 英文提交 · v1.0.1` 窗口输入中文，Enter 发送；Shift+Enter 换行。窗口关闭后可重新启用扩展，或调用 `open_translation_window` 重新打开。
 
 缺少 Key 时，中文不会提交；已有英文可直接准备提交。翻译后仍含中文（包括代码和路径中的中文）也会停止，不会自动换成旧模式。配置变更后重新启用扩展，避免沿用旧进程；更改服务商、模型或 Key 会重新建立相应的本地翻译服务。
 
